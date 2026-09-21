@@ -74,6 +74,27 @@ table is needed the way the Java bridge needs one. `GuiGridView` rows and `GuiTr
 nodes are virtualised (not real children) and are emitted as synthetic `GridRow` /
 `GridCell` / `TreeNode` elements in page source and XPath.
 
+## Testing
+
+`test/e2e/` has two suites, both gated behind `RUN_SAP_E2E=1` (skipped by default —
+they need SAP Logon running with an open, scripting-enabled session; see the ABAP
+backend in the `appium-wincore-test-apps` sibling repo, `sap/`):
+
+- `sap-attach.e2e.ts` — connection lifecycle: status before attach, attach, status
+  after attach, detach, commands failing cleanly with nothing attached.
+- `sap-interaction.e2e.ts` — find/read/write against the SAP Logon screen's
+  well-known field ids: `sap.findElement` (hit and miss), `sap.getProperty` /
+  `sap.getText` / `sap.getTagName` / `sap.getRect`, a `sap.setValue` round trip (value
+  is restored after), and `sap.evaluateXPath` (single and `multiple: true`).
+
+This is basic wiring coverage — is each `sap.*` verb reachable end to end at all —
+not full behavioral coverage of every `GuiComponent` type (`GuiGridView` /
+`GuiComboBox` / `GuiTree` cases etc. still need adding once this is green).
+
+```bash
+RUN_SAP_E2E=1 npm run test:e2e
+```
+
 ## Build from source
 
 ```bash
