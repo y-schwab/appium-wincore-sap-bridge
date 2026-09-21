@@ -1,0 +1,7 @@
+node_modules/
+build/
+native/plugin/*
+!native/plugin/plugin.json
+csharp/**/bin/
+csharp/**/obj/
+*.user

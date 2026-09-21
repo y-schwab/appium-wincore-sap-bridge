@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>WincoreSapBridge</AssemblyName>
+    <RootNamespace>Wincore.SapBridge</RootNamespace>
+    <Version>1.0.0</Version>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Plugin contract. Resolved at runtime to the host's already-loaded copy
+         (PluginLoadContext pins "WincoreServerSdk" to the default context), so it
+         must NOT ship in the plugin's output folder. -->
+    <PackageReference Include="WincoreServerSdk" Version="1.0.0">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

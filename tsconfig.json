@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@appium/tsconfig/tsconfig.json",
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "outDir": "build",
+    "strict": false,
+    "types": ["node"],
+    "noImplicitOverride": true
+  },
+  "include": ["lib", "eslint.config.mjs"]
+}
