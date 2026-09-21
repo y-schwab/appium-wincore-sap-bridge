@@ -6,11 +6,10 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  * Connection lifecycle only — no element interaction. See sap-interaction.e2e.ts for
  * find/read/write coverage.
  *
- * Needs SAP Logon running with an open SAP session (scripting enabled) — see README.
- * Skipped by default; set RUN_SAP_E2E=1 once a live backend is available
- * (appium-wincore-test-apps sibling repo, sap/).
+ * Needs SAP Logon running with an open SAP session (scripting enabled) — see README
+ * (appium-wincore-test-apps sibling repo, sap/, stands up the backend).
  */
-describe.skipIf(!process.env.RUN_SAP_E2E)('sap-bridge attach', () => {
+describe('sap-bridge attach', () => {
     let driver: Browser;
 
     beforeEach(async () => {

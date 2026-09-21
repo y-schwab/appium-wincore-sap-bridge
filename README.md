@@ -76,9 +76,9 @@ nodes are virtualised (not real children) and are emitted as synthetic `GridRow`
 
 ## Testing
 
-`test/e2e/` has two suites, both gated behind `RUN_SAP_E2E=1` (skipped by default —
-they need SAP Logon running with an open, scripting-enabled session; see the ABAP
-backend in the `appium-wincore-test-apps` sibling repo, `sap/`):
+`test/e2e/` has two suites. Both need SAP Logon running with an open,
+scripting-enabled session — see the ABAP backend in the `appium-wincore-test-apps`
+sibling repo, `sap/` — and will fail (not skip) without one:
 
 - `sap-attach.e2e.ts` — connection lifecycle: status before attach, attach, status
   after attach, detach, commands failing cleanly with nothing attached.
@@ -92,7 +92,7 @@ not full behavioral coverage of every `GuiComponent` type (`GuiGridView` /
 `GuiComboBox` / `GuiTree` cases etc. still need adding once this is green).
 
 ```bash
-RUN_SAP_E2E=1 npm run test:e2e
+npm run test:e2e
 ```
 
 ## Build from source

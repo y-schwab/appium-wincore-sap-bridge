@@ -11,19 +11,23 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  *
  * Needs SAP Logon running, attached at the login screen (client/user/password/language
  * fields empty or already-attempted — this suite only reads and restores, never
- * submits). Skipped by default; set RUN_SAP_E2E=1 once a live backend is available.
+ * submits). See README (appium-wincore-test-apps sibling repo, sap/, stands up the backend).
  */
 const LOGIN_USER_FIELD = 'wnd[0]/usr/txtRSYST-BNAME';
 const LOGIN_CLIENT_FIELD = 'wnd[0]/usr/txtRSYST-MANDT';
 
-describe.skipIf(!process.env.RUN_SAP_E2E)('sap-bridge interaction', () => {
+describe('sap-bridge interaction', () => {
     let driver: Browser;
-    let attached = false;
 
     beforeAll(async () => {
         driver = await createSapGuiSession();
-        const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]) as { attached: boolean };
-        attached = status.attached;
+        const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]) as {
+            attached: boolean;
+            reason?: string;
+        };
+        if (!status.attached) {
+            throw new Error(`sap.attach failed: ${status.reason ?? 'unknown reason'} — is SAP Logon open at the login screen?`);
+        }
     });
 
     afterAll(async () => {
@@ -31,26 +35,22 @@ describe.skipIf(!process.env.RUN_SAP_E2E)('sap-bridge interaction', () => {
     });
 
     it('sap.pageSource returns a non-empty tree rooted at the active window', async () => {
-        if (!attached) {return;}
         const xml = await driver.executeScript('windows: sapPageSource', []) as string;
         expect(xml).toContain('<');
         expect(xml).toMatch(/Type="Gui\w+"/);
     });
 
     it('sap.findElement resolves a known field id to a sap:-prefixed element', async () => {
-        if (!attached) {return;}
         const id = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string | null;
         expect(id).toMatch(/^sap:/);
     });
 
     it('sap.findElement returns null for an id that does not exist', async () => {
-        if (!attached) {return;}
         const id = await driver.executeScript('windows: sapFindElement', ['wnd[0]/usr/doesNotExist']) as string | null;
         expect(id).toBeNull();
     });
 
     it('sap.getProperty / sap.getText / sap.getTagName / sap.getRect all resolve the same element', async () => {
-        if (!attached) {return;}
         const id = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
 
         const type = await driver.executeScript('windows: sapGetProperty', [id, 'Type']);
@@ -67,7 +67,6 @@ describe.skipIf(!process.env.RUN_SAP_E2E)('sap-bridge interaction', () => {
     });
 
     it('sap.setValue writes a value that sap.getText reads back, and restores it', async () => {
-        if (!attached) {return;}
         const id = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
         const original = await driver.executeScript('windows: sapGetText', [id]) as string;
 
@@ -81,13 +80,11 @@ describe.skipIf(!process.env.RUN_SAP_E2E)('sap-bridge interaction', () => {
     });
 
     it('sap.setFocus / sap.select do not throw against an interactive field', async () => {
-        if (!attached) {return;}
         const id = await driver.executeScript('windows: sapFindElement', [LOGIN_CLIENT_FIELD]) as string;
         await driver.executeScript('windows: sapSetFocus', [id]);
     });
 
     it('sap.evaluateXPath finds the same field by attribute, matching sap.findElement', async () => {
-        if (!attached) {return;}
         const byId = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
         // `Id` (the SAP-canonical, GetProperty-readable form) is the full absolute path —
         // e.g. "/app/con[0]/ses[0]/wnd[0]/usr/txtRSYST-BNAME" — even though FindById also
@@ -102,7 +99,6 @@ describe.skipIf(!process.env.RUN_SAP_E2E)('sap-bridge interaction', () => {
     });
 
     it('sap.evaluateXPath with multiple=true returns every GuiTextField on the login screen', async () => {
-        if (!attached) {return;}
         const ids = await driver.executeScript('windows: sapEvaluateXPath', ['//GuiTextField', true]) as string[];
         expect(Array.isArray(ids)).toBe(true);
         expect(ids.length).toBeGreaterThan(0);
