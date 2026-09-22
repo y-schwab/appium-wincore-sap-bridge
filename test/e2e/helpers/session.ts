@@ -93,7 +93,7 @@ export async function bootstrapSapSession(driver: Browser, connectionIndex = 0, 
     let status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex, sessionIndex }]) as AttachResult;
 
     if (!status.attached && status.reason === 'no_open_connection') {
-        await driver.executeScript('windows: openSapConnection', [SAP_CONNECTION]);
+        await driver.executeScript('windows: openSapConnection', [{ connectionName: SAP_CONNECTION }]);
         status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex, sessionIndex }]) as AttachResult;
     }
 

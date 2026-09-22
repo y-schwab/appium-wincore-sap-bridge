@@ -38,56 +38,56 @@ describe('sap-bridge interaction', () => {
     });
 
     it('sap.findElement resolves a known field id to a sap:-prefixed element', async () => {
-        const id = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string | null;
+        const id = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_USER_FIELD }]) as string | null;
         expect(id).toMatch(/^sap:/);
     });
 
     it('sap.findElement returns null for an id that does not exist', async () => {
-        const id = await driver.executeScript('windows: sapFindElement', ['wnd[0]/usr/doesNotExist']) as string | null;
+        const id = await driver.executeScript('windows: sapFindElement', [{ id: 'wnd[0]/usr/doesNotExist' }]) as string | null;
         expect(id).toBeNull();
     });
 
     it('sap.getProperty / sap.getText / sap.getTagName / sap.getRect all resolve the same element', async () => {
-        const id = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
+        const id = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_USER_FIELD }]) as string;
 
-        const type = await driver.executeScript('windows: sapGetProperty', [id, 'Type']);
+        const type = await driver.executeScript('windows: sapGetProperty', [{ elementId: id, property: 'Type' }]);
         expect(type).toBe('GuiTextField');
 
-        const tagName = await driver.executeScript('windows: sapGetTagName', [id]);
+        const tagName = await driver.executeScript('windows: sapGetTagName', [{ elementId: id }]);
         expect(tagName).toBe('GuiTextField');
 
-        await driver.executeScript('windows: sapGetText', [id]); // just must not throw
+        await driver.executeScript('windows: sapGetText', [{ elementId: id }]); // just must not throw
 
-        const rect = await driver.executeScript('windows: sapGetRect', [id]) as { x: number; y: number; width: number; height: number };
+        const rect = await driver.executeScript('windows: sapGetRect', [{ elementId: id }]) as { x: number; y: number; width: number; height: number };
         expect(rect.width).toBeGreaterThan(0);
         expect(rect.height).toBeGreaterThan(0);
     });
 
     it('sap.setValue writes a value that sap.getText reads back, and restores it', async () => {
-        const id = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
-        const original = await driver.executeScript('windows: sapGetText', [id]) as string;
+        const id = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_USER_FIELD }]) as string;
+        const original = await driver.executeScript('windows: sapGetText', [{ elementId: id }]) as string;
 
         try {
-            await driver.executeScript('windows: sapSetValue', [id, 'wincore-e2e']);
-            const written = await driver.executeScript('windows: sapGetText', [id]);
+            await driver.executeScript('windows: sapSetValue', [{ elementId: id, value: 'wincore-e2e' }]);
+            const written = await driver.executeScript('windows: sapGetText', [{ elementId: id }]);
             expect(written).toBe('wincore-e2e');
         } finally {
-            await driver.executeScript('windows: sapSetValue', [id, original]);
+            await driver.executeScript('windows: sapSetValue', [{ elementId: id, value: original }]);
         }
     });
 
     it('sap.setFocus / sap.select do not throw against an interactive field', async () => {
-        const id = await driver.executeScript('windows: sapFindElement', [LOGIN_CLIENT_FIELD]) as string;
-        await driver.executeScript('windows: sapSetFocus', [id]);
+        const id = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_CLIENT_FIELD }]) as string;
+        await driver.executeScript('windows: sapSetFocus', [{ elementId: id }]);
     });
 
     it('sap.evaluateXPath finds the same field by attribute, matching sap.findElement', async () => {
-        const byId = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
+        const byId = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_USER_FIELD }]) as string;
         // `Id` (the SAP-canonical, GetProperty-readable form) is the full absolute path —
         // e.g. "/app/con[0]/ses[0]/wnd[0]/usr/txtRSYST-BNAME" — even though FindById also
         // accepts the short session-relative form used above. Read it back rather than
         // assuming the two strings match.
-        const fullId = await driver.executeScript('windows: sapGetProperty', [byId, 'Id']) as string;
+        const fullId = await driver.executeScript('windows: sapGetProperty', [{ elementId: byId, property: 'Id' }]) as string;
         const byXPath = await driver.executeScript(
             'windows: sapEvaluateXPath',
             ['//*[@Id="' + fullId + '"]', false],
@@ -96,7 +96,7 @@ describe('sap-bridge interaction', () => {
     });
 
     it('sap.evaluateXPath with multiple=true returns every GuiTextField on the login screen', async () => {
-        const ids = await driver.executeScript('windows: sapEvaluateXPath', ['//GuiTextField', true]) as string[];
+        const ids = await driver.executeScript('windows: sapEvaluateXPath', [{ expression: '//GuiTextField', multiple: true }]) as string[];
         expect(Array.isArray(ids)).toBe(true);
         expect(ids.length).toBeGreaterThan(0);
         expect(ids.every((id) => id.startsWith('sap:'))).toBe(true);

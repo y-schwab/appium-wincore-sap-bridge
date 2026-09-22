@@ -57,17 +57,17 @@ describe('sap-bridge login', () => {
         }
 
         if (SAP_CLIENT) {
-            const clientId = await driver.executeScript('windows: sapFindElement', [LOGIN_CLIENT_FIELD]) as string;
-            await driver.executeScript('windows: sapSetValue', [clientId, SAP_CLIENT]);
+            const clientId = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_CLIENT_FIELD }]) as string;
+            await driver.executeScript('windows: sapSetValue', [{ elementId: clientId, value: SAP_CLIENT }]);
         }
 
-        const userId = await driver.executeScript('windows: sapFindElement', [LOGIN_USER_FIELD]) as string;
-        await driver.executeScript('windows: sapSetValue', [userId, SAP_USER]);
+        const userId = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_USER_FIELD }]) as string;
+        await driver.executeScript('windows: sapSetValue', [{ elementId: userId, value: SAP_USER }]);
 
-        const passwordId = await driver.executeScript('windows: sapFindElement', [LOGIN_PASSWORD_FIELD]) as string;
-        await driver.executeScript('windows: sapSetValue', [passwordId, SAP_PASSWORD]);
+        const passwordId = await driver.executeScript('windows: sapFindElement', [{ id: LOGIN_PASSWORD_FIELD }]) as string;
+        await driver.executeScript('windows: sapSetValue', [{ elementId: passwordId, value: SAP_PASSWORD }]);
 
-        await driver.executeScript('windows: sapSendVKey', [0]); // Enter
+        await driver.executeScript('windows: sapSendVKey', [{ vkey: 0 }]); // Enter
         await delay(1500); // screen transition is not instantaneous
 
         const after = await driver.executeScript('windows: sapPageSource', []) as string;
