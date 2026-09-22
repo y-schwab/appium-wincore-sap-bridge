@@ -93,6 +93,9 @@ internal sealed class SapGuiClient : IDisposable
             sessionIndex,
             system = connection.GetString("Description"),
             sessionInfo = DescribeSessionInfo(_session),
+            // Same "0x%08x" form the driver's getWindowHandles returns — pass one to
+            // switchToWindow to root standard find / page source in this session.
+            windowHandles = SessionWindows().Select(w => $"0x{w.Hwnd.ToInt64():x8}").ToArray(),
         };
     }
 
@@ -187,11 +190,145 @@ internal sealed class SapGuiClient : IDisposable
         return comp;
     }
 
-    public string? FindFirstById(string sapId)
+    // ── Window ownership ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The attached session's top-level frame windows (<c>wnd[0]</c>, modal
+    /// <c>wnd[1]</c>, …) with their native handles — what lets the host route a
+    /// standard find / page source rooted at a SAP window into this tree.
+    /// </summary>
+    public IReadOnlyList<(IntPtr Hwnd, string Id)> SessionWindows()
     {
-        var comp = SessionOrThrow().CallObjOrNull("FindById", sapId, false);
-        return comp == null ? null : IdPrefix + comp.GetString("Id");
+        var result = new List<(IntPtr, string)>();
+        if (_session == null) return result;
+        try
+        {
+            var children = _session.GetObj("Children");
+            int n = children.GetInt("Count");
+            for (int i = 0; i < n; i++)
+            {
+                var wnd = children.GetObjOrNull("ElementAt", i);
+                if (wnd == null) continue;
+                var handle = wnd.Get("Handle");
+                if (handle == null) continue;
+                result.Add((new IntPtr(Convert.ToInt64(handle)), wnd.GetString("Id")));
+            }
+        }
+        catch { }
+        return result;
     }
+
+    public string? WindowRootId(IntPtr hwnd)
+    {
+        foreach (var (h, id) in SessionWindows())
+            if (h == hwnd) return IdPrefix + id;
+        return null;
+    }
+
+    // ── Condition find ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Standard-locator find over the SAP subtree, walked in document order. UIA
+    /// property names map onto SAP scripting properties: <c>AutomationId</c> → the SAP
+    /// <c>Id</c> (full <c>/app/con[0]/ses[0]/wnd[0]/usr/txtX</c> or any trailing path such
+    /// as <c>wnd[0]/usr/txtX</c>), <c>Name</c> → <c>Name</c>, <c>ClassName</c> /
+    /// <c>ControlType</c> / <c>LocalizedControlType</c> → <c>Type</c>, <c>IsEnabled</c> →
+    /// <c>Changeable</c>.
+    /// </summary>
+    public List<string> FindByCondition(string rootElementId, ConditionDto condition, string scope, bool first)
+    {
+        var results = new List<string>();
+        var root = Resolve(rootElementId);
+        scope = scope.ToLowerInvariant();
+
+        if (scope is "element" or "subtree") Visit(root, condition, results);
+        if (first && results.Count > 0) return results;
+
+        if (scope is "children") VisitChildren(root, c => Visit(c, condition, results), results, first);
+        else if (scope is not "element") VisitChildren(root, c => Walk(c, condition, results, first, 0), results, first);
+        return results;
+    }
+
+    private void Walk(Disp comp, ConditionDto condition, List<string> results, bool first, int depth)
+    {
+        if (depth > MaxDepth || (first && results.Count > 0)) return;
+        Visit(comp, condition, results);
+        VisitChildren(comp, c => Walk(c, condition, results, first, depth + 1), results, first);
+    }
+
+    private static void VisitChildren(Disp comp, Action<Disp> action, List<string> results, bool first)
+    {
+        if (!comp.GetBool("ContainerType")) return;
+        var children = comp.GetObjOrNull("Children");
+        int n = children?.GetInt("Count") ?? 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (first && results.Count > 0) return;
+            Disp? child;
+            try { child = children!.GetObjOrNull("ElementAt", i); }
+            catch { continue; }
+            if (child != null) action(child);
+        }
+    }
+
+    private static void Visit(Disp comp, ConditionDto condition, List<string> results)
+    {
+        try
+        {
+            if (Matches(comp, condition)) results.Add(IdPrefix + comp.GetString("Id"));
+        }
+        catch { }
+    }
+
+    private static bool Matches(Disp comp, ConditionDto c) => c.Type.ToLowerInvariant() switch
+    {
+        "true" => true,
+        "false" => false,
+        "and" => (c.Conditions ?? []).All(x => Matches(comp, x)),
+        "or" => (c.Conditions ?? []).Any(x => Matches(comp, x)),
+        "not" => c.Condition != null && !Matches(comp, c.Condition),
+        "property" => MatchesProperty(comp, c),
+        _ => false,
+    };
+
+    private static bool MatchesProperty(Disp comp, ConditionDto c)
+    {
+        var expected = c.Value switch
+        {
+            null => "",
+            { ValueKind: System.Text.Json.JsonValueKind.String } v => v.GetString() ?? "",
+            { } v => v.ToString(),
+        };
+
+        switch (c.Property?.ToLowerInvariant())
+        {
+            case "automationid":
+            {
+                var id = comp.GetString("Id");
+                if (c.Match == null)
+                    return id == expected || (expected.Length > 0 && id.EndsWith("/" + expected.TrimStart('/'), StringComparison.Ordinal));
+                return MatchString(id, expected, c.Match, StringComparison.Ordinal);
+            }
+            case "name":
+                return MatchString(comp.GetString("Name"), expected, c.Match, StringComparison.Ordinal);
+            case "classname":
+            case "controltype":
+            case "localizedcontroltype":
+                return MatchString(comp.GetString("Type"), expected, c.Match, StringComparison.OrdinalIgnoreCase);
+            case "isenabled":
+                return comp.GetBool("Changeable") == ParseBool(expected);
+            default:
+                return false;
+        }
+    }
+
+    private static bool MatchString(string actual, string expected, string? match, StringComparison cmp) =>
+        match?.ToLowerInvariant() switch
+        {
+            "contains" => actual.Contains(expected, cmp),
+            "startswith" => actual.StartsWith(expected, cmp),
+            _ => string.Equals(actual, expected, cmp),
+        };
 
     // ── Page source / tree ─────────────────────────────────────────────────────
 
@@ -203,8 +340,6 @@ internal sealed class SapGuiClient : IDisposable
         doc.AppendChild(rootXml);
         return doc.OuterXml;
     }
-
-    public object DumpTree(string? contextElementId) => GetPageSourceXml(contextElementId);
 
     private Disp ResolveContextOrActiveWindow(string? contextElementId)
     {

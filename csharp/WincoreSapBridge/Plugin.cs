@@ -8,21 +8,21 @@ namespace Wincore.SapBridge;
 /// <summary>
 /// Server plugin for SAP GUI for Windows — loaded by WincoreServer's PluginLoader
 /// from this package's <c>native/plugin/</c> folder (on
-/// <c>WINCORE_SERVER_PLUGINS</c>). Contributes 17 <c>sap.*</c> commands (reached
-/// client-side via <c>windows: attachSapGui</c> plus this package's <c>lib/</c>
-/// helpers) and a tree provider for the <c>sap:</c> element-id namespace.
+/// <c>WINCORE_SERVER_PLUGINS</c>). Contributes a tree provider for the <c>sap:</c>
+/// element-id namespace plus the <c>sap.attach</c> / <c>sap.detach</c> lifecycle
+/// commands (client-side <c>windows: attachSapGui</c> / <c>windows: detachSapGui</c>).
 ///
 /// Unlike the Java / .NET bridges, nothing is injected: SAP GUI's scripting engine
 /// already runs inside <c>saplogon.exe</c> whenever "Enable scripting" is ticked in
 /// SAP GUI options. <c>sap.attach</c> binds to it via
-/// <see cref="System.Runtime.InteropServices.Marshal.BindToMoniker"/>; every other
-/// command needs an attached session first.
+/// <see cref="System.Runtime.InteropServices.Marshal.BindToMoniker"/> and selects a
+/// session.
 ///
-/// SAP has no attribute-based find and no per-window ownership model the way the
-/// Java / .NET trees do — a session is attached by connection/session index, not by
-/// hwnd — so <see cref="SapTreeProvider.AutoRouteStandardFind"/> is false and
-/// standard <c>findElement</c> never routes here; every SAP interaction goes through
-/// this plugin's own <c>sap.*</c> commands (id or XPath addressed).
+/// Once attached, everything else is standard WebDriver, same model as the Java
+/// bridge: the provider owns the attached session's frame windows (matched by
+/// <c>GuiFrameWindow.Handle</c>), so find / page source / XPath rooted at one of them
+/// auto-route into the SAP tree, and element commands reach it by the <c>sap:</c> id
+/// prefix.
 /// </summary>
 public sealed class Plugin : IServerPlugin
 {
@@ -48,23 +48,15 @@ public sealed class Plugin : IServerPlugin
     {
         ["sap.attach"] = Attach,
         ["sap.detach"] = Detach,
-        ["sap.status"] = Status,
+        // Server-only (no windows: command) — scripts/sap-inspect.mjs talks to
+        // WincoreServer.exe directly, without a window-rooted session to route through.
         ["sap.pageSource"] = PageSource,
-        ["sap.dumpTree"] = DumpTree,
-        ["sap.findElement"] = FindElement,
-        ["sap.evaluateXPath"] = EvaluateXPath,
-        ["sap.getProperty"] = GetProperty,
-        ["sap.getText"] = GetText,
-        ["sap.getTagName"] = GetTagName,
-        ["sap.getRect"] = GetRect,
-        ["sap.setValue"] = SetValue,
-        ["sap.invoke"] = Invoke,
-        ["sap.setFocus"] = SetFocus,
-        ["sap.select"] = Select,
-        ["sap.sendVKey"] = SendVKey,
+        // SAP virtual keys (F-keys, Enter sent to the window rather than a field) have no
+        // WebDriver equivalent — disabled for now.
+        // ["sap.sendVKey"] = SendVKey,
     };
 
-    // ── sap.attach / sap.detach / sap.status ──────────────────────────────────
+    // ── sap.attach / sap.detach ───────────────────────────────────────────────
 
     private object? Attach(ISessionContext ctx, JsonElement? parameters)
     {
@@ -81,90 +73,19 @@ public sealed class Plugin : IServerPlugin
         return new { detached = true };
     }
 
-    private object? Status(ISessionContext ctx, JsonElement? parameters) =>
-        new { attached = Provider.IsAttached };
-
-    // ── tree / find ──────────────────────────────────────────────────────────
+    // ── page source (inspector) ───────────────────────────────────────────────
 
     private object? PageSource(ISessionContext ctx, JsonElement? parameters) =>
         Client.GetPageSourceXml(GetString(parameters, "contextElementId"));
 
-    private object? DumpTree(ISessionContext ctx, JsonElement? parameters) =>
-        Client.DumpTree(GetString(parameters, "contextElementId"));
-
-    private object? FindElement(ISessionContext ctx, JsonElement? parameters)
-    {
-        var id = GetString(parameters, "id")
-            ?? throw new ArgumentException("sap.findElement requires 'id'.");
-        return Client.FindFirstById(SapGuiClient.RawId(id));
-    }
-
-    private object? EvaluateXPath(ISessionContext ctx, JsonElement? parameters)
-    {
-        var p = parameters ?? throw new ArgumentException("Parameters required.");
-        var expression = p.GetProperty("expression").GetString()
-            ?? throw new ArgumentException("expression is required.");
-        bool multiple = p.TryGetProperty("multiple", out var m) && m.ValueKind == JsonValueKind.True;
-        return Client.EvaluateXPath(GetString(parameters, "contextElementId"), expression, multiple);
-    }
-
-    // ── element getters / interaction ───────────────────────────────────────
-
-    private object? GetProperty(ISessionContext ctx, JsonElement? parameters)
-    {
-        var id = RequireId(parameters);
-        var property = GetString(parameters, "property")
-            ?? throw new ArgumentException("sap.getProperty requires 'property'.");
-        return Client.GetProperty(id, property);
-    }
-
-    private object? GetText(ISessionContext ctx, JsonElement? parameters) =>
-        Client.GetText(RequireId(parameters));
-
-    private object? GetTagName(ISessionContext ctx, JsonElement? parameters) =>
-        Client.GetTagName(RequireId(parameters));
-
-    private object? GetRect(ISessionContext ctx, JsonElement? parameters) =>
-        Client.GetRect(RequireId(parameters));
-
-    private object? SetValue(ISessionContext ctx, JsonElement? parameters)
-    {
-        var id = RequireId(parameters);
-        var value = GetString(parameters, "value") ?? "";
-        Client.SetValue(id, value);
-        return null;
-    }
-
-    private object? Invoke(ISessionContext ctx, JsonElement? parameters)
-    {
-        Client.Invoke(RequireId(parameters));
-        return null;
-    }
-
-    private object? SetFocus(ISessionContext ctx, JsonElement? parameters)
-    {
-        Client.SetFocus(RequireId(parameters));
-        return null;
-    }
-
-    private object? Select(ISessionContext ctx, JsonElement? parameters)
-    {
-        Client.Select(RequireId(parameters));
-        return null;
-    }
-
-    private object? SendVKey(ISessionContext ctx, JsonElement? parameters)
-    {
-        int vkey = GetInt(parameters, "vkey", 0);
-        Client.SendVKey(vkey, GetString(parameters, "windowElementId"));
-        return null;
-    }
+    // private object? SendVKey(ISessionContext ctx, JsonElement? parameters)
+    // {
+    //     int vkey = GetInt(parameters, "vkey", 0);
+    //     Client.SendVKey(vkey, GetString(parameters, "windowElementId"));
+    //     return null;
+    // }
 
     // ── param helpers ──────────────────────────────────────────────────────
-
-    private static string RequireId(JsonElement? p) =>
-        GetString(p, "elementId") ?? GetString(p, "id")
-        ?? throw new ArgumentException("This sap command requires 'elementId'.");
 
     private static string? GetString(JsonElement? p, string name) =>
         p?.TryGetProperty(name, out var v) == true && v.ValueKind == JsonValueKind.String
@@ -179,10 +100,9 @@ public sealed class Plugin : IServerPlugin
 
 /// <summary>
 /// <see cref="ITreeProvider"/> over <see cref="SapGuiClient"/>. Owns the client and
-/// its attach lifecycle; the host only ever reaches SAP elements through ids this
-/// provider minted (<c>sap:</c> prefix), by way of this plugin's <c>sap.*</c>
-/// commands rather than generic find, since SAP exposes no attribute-based find and
-/// attach is keyed by connection/session index, not by window.
+/// its attach lifecycle. Owns every frame window of the attached session, auto-routes
+/// standard find and swaps page source for them (UIA sees a SAP session window as one
+/// opaque pane), and answers element commands for the <c>sap:</c> ids it minted.
 /// </summary>
 internal sealed class SapTreeProvider : ITreeProvider
 {
@@ -212,20 +132,20 @@ internal sealed class SapTreeProvider : ITreeProvider
     public bool OwnsElementId(string elementId) => SapGuiClient.IsSapId(elementId);
     public bool IsAttached => _client?.IsAttached ?? false;
 
-    public bool AutoRouteStandardFind => false;
-    public bool AutoSwapsPageSource => false;
+    public bool AutoRouteStandardFind => true;
+    public bool AutoSwapsPageSource => true;
 
-    public bool OwnsWindow(IntPtr hwnd, string windowTitle) => false;
-    public string? GetWindowRootId(IntPtr hwnd, string windowTitle) => null;
+    public bool OwnsWindow(IntPtr hwnd, string windowTitle) => _client?.WindowRootId(hwnd) != null;
+    public string? GetWindowRootId(IntPtr hwnd, string windowTitle) => _client?.WindowRootId(hwnd);
 
     private SapGuiClient RequireClient() =>
         _client ?? throw new InvalidOperationException("SAP GUI is not attached. Call sap.attach first.");
 
     public string? FindFirst(string rootElementId, ConditionDto condition, string scope) =>
-        throw new NotSupportedException("SAP GUI has no attribute-based find — use sap.findElement (by id) or sap.evaluateXPath.");
+        RequireClient().FindByCondition(rootElementId, condition, scope, first: true).FirstOrDefault();
 
     public IReadOnlyList<string> FindAll(string rootElementId, ConditionDto condition, string scope) =>
-        throw new NotSupportedException("SAP GUI has no attribute-based find — use sap.evaluateXPath.");
+        RequireClient().FindByCondition(rootElementId, condition, scope, first: false);
 
     public object? EvaluateXPath(string rootElementId, string expression, bool multiple) =>
         RequireClient().EvaluateXPath(rootElementId, expression, multiple);
@@ -256,7 +176,7 @@ internal sealed class SapTreeProvider : ITreeProvider
     public void SetValue(string elementId, string value) => RequireClient().SetValue(elementId, value);
     public void Select(string elementId) => RequireClient().Select(elementId);
     public void RequestFocus(string elementId) => RequireClient().SetFocus(elementId);
-    public void Expand(string elementId) { /* GuiTree nodes expand via sap.invoke on the TreeNode's key — not modelled as a UIA ExpandCollapse pattern. */ }
+    public void Expand(string elementId) { /* GuiTree nodes expand via Invoke on the TreeNode's key — not modelled as a UIA ExpandCollapse pattern. */ }
 
     public void BuildPageSourceXml(string rootElementId, XmlDocument doc, XmlElement? parent)
     {

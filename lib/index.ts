@@ -1,23 +1,7 @@
 import { BasePlugin } from 'appium/plugin';
 import type { ExecuteMethodMap, ExternalDriver, NextPluginCallback } from '@appium/types';
 import { join } from 'node:path';
-import {
-    attachSapGui,
-    detachSapGui,
-    sapGuiStatus,
-    sapPageSource,
-    sapFindElement,
-    sapEvaluateXPath,
-    sapGetProperty,
-    sapGetText,
-    sapGetTagName,
-    sapGetRect,
-    sapSetValue,
-    sapInvoke,
-    sapSetFocus,
-    sapSelect,
-    sapSendVKey,
-} from './commands.js';
+import { attachSapGui, detachSapGui } from './commands.js';
 
 /**
  * The real work of this bridge is a WincoreServer tree-provider plugin
@@ -37,39 +21,12 @@ export class SapBridgePlugin extends BasePlugin {
     static override executeMethodMap: ExecuteMethodMap<SapBridgePlugin> = {
         'windows: attachSapGui': { command: 'attachSapGui', params: { optional: ['connectionIndex', 'sessionIndex'] } },
         'windows: detachSapGui': { command: 'detachSapGui' },
-        'windows: sapGuiStatus': { command: 'sapGuiStatus' },
-        'windows: sapPageSource': { command: 'sapPageSource', params: { optional: ['contextElementId'] } },
-        'windows: sapFindElement': { command: 'sapFindElement', params: { required: ['id'] } },
-        'windows: sapEvaluateXPath': {
-            command: 'sapEvaluateXPath',
-            params: { required: ['expression'], optional: ['multiple', 'contextElementId'] },
-        },
-        'windows: sapGetProperty': { command: 'sapGetProperty', params: { required: ['elementId', 'property'] } },
-        'windows: sapGetText': { command: 'sapGetText', params: { required: ['elementId'] } },
-        'windows: sapGetTagName': { command: 'sapGetTagName', params: { required: ['elementId'] } },
-        'windows: sapGetRect': { command: 'sapGetRect', params: { required: ['elementId'] } },
-        'windows: sapSetValue': { command: 'sapSetValue', params: { required: ['elementId', 'value'] } },
-        'windows: sapInvoke': { command: 'sapInvoke', params: { required: ['elementId'] } },
-        'windows: sapSetFocus': { command: 'sapSetFocus', params: { required: ['elementId'] } },
-        'windows: sapSelect': { command: 'sapSelect', params: { required: ['elementId'] } },
-        'windows: sapSendVKey': { command: 'sapSendVKey', params: { required: ['vkey'], optional: ['windowElementId'] } },
+        // 'windows: sapSendVKey': { command: 'sapSendVKey', params: { required: ['vkey'], optional: ['windowElementId'] } },
     };
 
     attachSapGui = attachSapGui;
     detachSapGui = detachSapGui;
-    sapGuiStatus = sapGuiStatus;
-    sapPageSource = sapPageSource;
-    sapFindElement = sapFindElement;
-    sapEvaluateXPath = sapEvaluateXPath;
-    sapGetProperty = sapGetProperty;
-    sapGetText = sapGetText;
-    sapGetTagName = sapGetTagName;
-    sapGetRect = sapGetRect;
-    sapSetValue = sapSetValue;
-    sapInvoke = sapInvoke;
-    sapSetFocus = sapSetFocus;
-    sapSelect = sapSelect;
-    sapSendVKey = sapSendVKey;
+    // sapSendVKey = sapSendVKey;
 
     /**
      * Appium's plugin dispatcher only gives a plugin a turn for the classic

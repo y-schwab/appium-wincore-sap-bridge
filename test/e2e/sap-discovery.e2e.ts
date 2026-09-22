@@ -57,8 +57,12 @@ describe('sap-bridge discovery', () => {
 
         save('03-page-source-after-attach.xml', await driver.getPageSource());
 
-        if ((attach as { attached?: boolean }).attached) {
-            save('04-sap-page-source-after-attach.xml', await driver.executeScript('windows: sapPageSource', []));
+        // Once attached, the plugin's tree provider owns the SAP session's windows: a
+        // plain getPageSource rooted at one of them comes from the SAP tree, not UIA.
+        const { attached, windowHandles } = attach as { attached?: boolean; windowHandles?: string[] };
+        if (attached && windowHandles?.length) {
+            await driver.switchToWindow(windowHandles[0]);
+            save('04-page-source-sap-window.xml', await driver.getPageSource());
         }
     }, 90_000);
 });

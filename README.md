@@ -20,11 +20,11 @@ equivalent of VBScript's `GetObject("SAPGUI")` — via a **tree provider**
 (`ITreeProvider`) contributed by this package's WincoreServer plugin
 (`native/plugin/WincoreSapBridge.dll`).
 
-SAP exposes no attribute-based find and no per-window ownership model the way the Java
-/ .NET trees do — you attach to a connection/session index, not a window — so this
-bridge does not auto-route standard `findElement`/`getPageSource` the way the Java
-bridge does. Every SAP interaction goes through this plugin's own `sap*` commands,
-addressed by SAP id (e.g. `/app/con[0]/ses[0]/wnd[0]/usr/txtRSYST-BNAME`) or XPath.
+Same model as the Java bridge: attach is the only plugin command. Once attached, the
+provider owns the attached session's frame windows (matched by `GuiFrameWindow.Handle`),
+so standard `findElement` / `getPageSource` / XPath rooted at one of them are served
+from the SAP tree, and element commands (`click`, `setValue`, `getText`, …) reach it
+through the `sap:` element-id prefix.
 
 ## Install
 
@@ -39,37 +39,35 @@ tree provider by appending its `native/plugin/` directory to the
 
 ## Usage
 
-Attach is a command, not a capability. Once a session is created (any root window —
-attach is keyed by SAP connection/session index, not by hwnd):
+Attach is a command, not a capability. Open a SAP connection first (e.g. double-click
+it in the SAP Logon window), then:
 
 ```js
 const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]);
-// { attached: true, connectionCount, sessionCount, system, sessionInfo: { user, transaction, program, ... } }
-// or { attached: false, reason: 'no_open_connection', ... } if nobody is logged in yet
+// { attached: true, connectionCount, sessionCount, system, sessionInfo: { ... }, windowHandles: ['0x000a1b2c', ...] }
+// or { attached: false, reason: 'no_open_connection', ... } if nothing is open yet
 
-// Cold start — nothing open yet: start the session with 'appium:app' pointing at
-// saplogon.exe, double-click the connection entry in the SAP Logon window, then attach
-// (see test/e2e/helpers/session.ts bootstrapSapSession).
-
-const id = await driver.executeScript('windows: sapFindElement', [{ id: 'wnd[0]/usr/txtRSYST-BNAME' }]);
-await driver.executeScript('windows: sapSetValue', [{ elementId: id, value: 'myuser' }]);
-await driver.executeScript('windows: sapSendVKey', [{ vkey: 0 }]); // Enter
+// Standard WebDriver from here on — root the session at a SAP window:
+await driver.switchToWindow(status.windowHandles[0]);
+const xml = await driver.getPageSource();                     // SAP tree
+const user = await driver.$('~wnd[0]/usr/txtRSYST-BNAME');     // accessibility id = SAP Id
+await user.setValue('myuser');
+const fields = await driver.$$('//GuiTextField');             // XPath over SAP Type tags
 ```
 
 | Command | Params | Description |
-|---|---|---|
-| `windows: attachSapGui` | `connectionIndex?`, `sessionIndex?` | Bind to the SAP GUI scripting engine and select a session. |
+| --- | --- | --- |
+| `windows: attachSapGui` | `connectionIndex?`, `sessionIndex?` | Bind to the SAP GUI scripting engine and select a session. Returns the session's `windowHandles`. |
 | `windows: detachSapGui` | — | Drop the SAP session reference. |
-| `windows: sapGuiStatus` | — | `{ attached: boolean }`. |
-| `windows: sapPageSource` | `contextElementId?` | XML dump of the SAP component tree (defaults to the active window). |
-| `windows: sapFindElement` | `id` | Resolve a raw SAP id to an element reference, or `null`. |
-| `windows: sapEvaluateXPath` | `expression`, `multiple?`, `contextElementId?` | Full XPath 1.0 over the SAP subtree. |
-| `windows: sapGetProperty` | `elementId`, `property` | Any SAP scripting property by name (`Text`, `Changeable`, `IconName`, …). |
-| `windows: sapGetText` / `sapGetTagName` / `sapGetRect` | `elementId` | Text, SAP `Type` (`GuiTextField`, `GuiButton`, …), and screen rect. |
-| `windows: sapSetValue` | `elementId`, `value` | Sets text/key/checked value, dispatched per control type. |
-| `windows: sapInvoke` | `elementId` | Press/Select/toggle, dispatched per control type. |
-| `windows: sapSetFocus` / `sapSelect` | `elementId` | `SetFocus()` / `Select()`. |
-| `windows: sapSendVKey` | `vkey`, `windowElementId?` | Send a virtual key (0 = Enter, 8 = F8, …) to a window; defaults to the active window. |
+
+Standard locators map onto SAP scripting properties:
+
+| Locator | SAP property |
+| --- | --- |
+| `accessibility id` (`~…`) | `Id` — full (`/app/con[0]/ses[0]/wnd[0]/usr/txtX`) or any trailing path (`wnd[0]/usr/txtX`) |
+| `name` | `Name` |
+| `class name` / `tag name` | `Type` (`GuiTextField`, `GuiButton`, …) |
+| `xpath` | full XPath 1.0 over page source |
 
 Page source, XPath, and element ids all use a `sap:` element-id prefix and the SAP
 `Type` string (`GuiTextField`, `GuiButton`, `GuiGridView`, `GuiTree`, …) as the tag
@@ -80,48 +78,23 @@ nodes are virtualised (not real children) and are emitted as synthetic `GridRow`
 
 ## Testing
 
-`test/e2e/` has three suites, and they're **cold-start friendly**: the only thing you
-need already running is the SAP backend itself (the ABAP container — see
-`appium-wincore-test-apps` sibling repo, `sap/`). SAP Logon does not need to be open —
-each session is created with `appium:app` set to `saplogon.exe` (plus `appium:noReset`,
-so an already-running instance is reused), and `bootstrapSapSession`
-(`test/e2e/helpers/session.ts`) double-clicks the connection entry in the SAP Logon
-window if nothing is open yet, before attaching. All three fail loudly
-(not skip) if that bootstrap can't succeed.
-
-- `sap-attach.e2e.ts` — connection lifecycle: status before attach, attach, status
-  after attach, detach, commands failing cleanly with nothing attached.
-- `sap-interaction.e2e.ts` — find/read/write against the SAP **Logon screen**'s
-  well-known field ids: `sap.findElement` (hit and miss), `sap.getProperty` /
-  `sap.getText` / `sap.getTagName` / `sap.getRect`, a `sap.setValue` round trip (value
-  is restored after), and `sap.evaluateXPath` (single and `multiple: true`). Needs a
-  **logged-out** session — it never submits the login form. A fresh cold-start
-  connection lands here naturally; if a connection was already open AND already
-  logged in, this suite fails — log off first in that case.
-- `sap-login.e2e.ts` — fills client/user/password and `sendVKey`s Enter, then checks
-  the login fields are gone. Idempotent (passes as a no-op if already logged in) but
-  does **not** log off afterward, so run `sap-interaction.e2e.ts` first (or against a
-  separate logged-out session) if you want both in one pass. Needs `SAP_USER` /
-  `SAP_PASSWORD` env vars — no default; `SAP_CLIENT` is optional.
+The e2e suite is currently scaled down to `sap-discovery.e2e.ts`: it launches SAP Logon
+through the driver (`appium:app` = `saplogon.exe`, `appium:noReset` to reuse a running
+instance), attaches, and dumps page source before / after attach — plus the SAP
+window's page source when attached — into `test-output/`. The attach / interaction /
+login suites are commented out and excluded in `vitest.e2e.config.ts` until they're
+rebuilt on standard WebDriver commands.
 
 Env vars for the bootstrap itself, both optional:
 
 | Var | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `SAP_LOGON_EXE` | `C:\Program Files (x86)\SAP\FrontEnd\SapGui\saplogon.exe` | Path used to launch SAP Logon if it isn't already running. |
 | `SAP_CONNECTION` | `A4H` | Connection entry name double-clicked in the SAP Logon window if nothing is open yet. |
 
-This is basic wiring coverage — is each `sap.*` verb reachable end to end at all —
-not full behavioral coverage of every `GuiComponent` type (`GuiGridView` /
-`GuiComboBox` / `GuiTree` cases etc. still need adding once this is green).
-
 ```bash
-SAP_USER=... SAP_PASSWORD=... npm run test:e2e
+npm run test:e2e
 ```
-
-`sap-login.e2e.ts` fails (not skips) if `SAP_USER`/`SAP_PASSWORD` are unset — run it on its
-own with `npx vitest run --config vitest.e2e.config.ts sap-attach sap-interaction` to skip
-the login suite deliberately.
 
 ## Build from source
 
