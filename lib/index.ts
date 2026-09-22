@@ -3,7 +3,6 @@ import type { ExecuteMethodMap, ExternalDriver, NextPluginCallback } from '@appi
 import { join } from 'node:path';
 import {
     attachSapGui,
-    openSapConnection,
     detachSapGui,
     sapGuiStatus,
     sapPageSource,
@@ -37,7 +36,6 @@ process.env.WINCORE_SERVER_PLUGINS =
 export class SapBridgePlugin extends BasePlugin {
     static override executeMethodMap: ExecuteMethodMap<SapBridgePlugin> = {
         'windows: attachSapGui': { command: 'attachSapGui', params: { optional: ['connectionIndex', 'sessionIndex'] } },
-        'windows: openSapConnection': { command: 'openSapConnection', params: { required: ['connectionName'] } },
         'windows: detachSapGui': { command: 'detachSapGui' },
         'windows: sapGuiStatus': { command: 'sapGuiStatus' },
         'windows: sapPageSource': { command: 'sapPageSource', params: { optional: ['contextElementId'] } },
@@ -58,7 +56,6 @@ export class SapBridgePlugin extends BasePlugin {
     };
 
     attachSapGui = attachSapGui;
-    openSapConnection = openSapConnection;
     detachSapGui = detachSapGui;
     sapGuiStatus = sapGuiStatus;
     sapPageSource = sapPageSource;

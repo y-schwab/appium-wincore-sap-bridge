@@ -47,21 +47,18 @@ const status = await driver.executeScript('windows: attachSapGui', [{ connection
 // { attached: true, connectionCount, sessionCount, system, sessionInfo: { user, transaction, program, ... } }
 // or { attached: false, reason: 'no_open_connection', ... } if nobody is logged in yet
 
-// Cold start — SAP Logon not even open yet, only the backend is up: launch
-// SAP Logon yourself (or see test/e2e/helpers/session.ts ensureSaplogonRunning for
-// a spawn-and-poll helper), then open a connection before attaching:
-// await driver.executeScript('windows: openSapConnection', ['A4H']);
-// await driver.executeScript('windows: attachSapGui', [{}]);
+// Cold start — nothing open yet: start the session with 'appium:app' pointing at
+// saplogon.exe, double-click the connection entry in the SAP Logon window, then attach
+// (see test/e2e/helpers/session.ts bootstrapSapSession).
 
-const id = await driver.executeScript('windows: sapFindElement', ['wnd[0]/usr/txtRSYST-BNAME']);
-await driver.executeScript('windows: sapSetValue', [id, 'myuser']);
-await driver.executeScript('windows: sapSendVKey', [0]); // Enter
+const id = await driver.executeScript('windows: sapFindElement', [{ id: 'wnd[0]/usr/txtRSYST-BNAME' }]);
+await driver.executeScript('windows: sapSetValue', [{ elementId: id, value: 'myuser' }]);
+await driver.executeScript('windows: sapSendVKey', [{ vkey: 0 }]); // Enter
 ```
 
 | Command | Params | Description |
 |---|---|---|
 | `windows: attachSapGui` | `connectionIndex?`, `sessionIndex?` | Bind to the SAP GUI scripting engine and select a session. |
-| `windows: openSapConnection` | `connectionName` | Open a connection by its SAP Logon "Local Workspace" entry name (e.g. `"A4H"`) — the scripting-API equivalent of double-clicking it. Only needs `saplogon.exe` running, not an already-open connection. |
 | `windows: detachSapGui` | — | Drop the SAP session reference. |
 | `windows: sapGuiStatus` | — | `{ attached: boolean }`. |
 | `windows: sapPageSource` | `contextElementId?` | XML dump of the SAP component tree (defaults to the active window). |
@@ -86,9 +83,10 @@ nodes are virtualised (not real children) and are emitted as synthetic `GridRow`
 `test/e2e/` has three suites, and they're **cold-start friendly**: the only thing you
 need already running is the SAP backend itself (the ABAP container — see
 `appium-wincore-test-apps` sibling repo, `sap/`). SAP Logon does not need to be open —
-every suite calls `bootstrapSapSession` (`test/e2e/helpers/session.ts`), which launches
-`saplogon.exe` if it isn't running and opens the connection (`windows:
-openSapConnection`) if nothing is open yet, before attaching. All three fail loudly
+each session is created with `appium:app` set to `saplogon.exe` (plus `appium:noReset`,
+so an already-running instance is reused), and `bootstrapSapSession`
+(`test/e2e/helpers/session.ts`) double-clicks the connection entry in the SAP Logon
+window if nothing is open yet, before attaching. All three fail loudly
 (not skip) if that bootstrap can't succeed.
 
 - `sap-attach.e2e.ts` — connection lifecycle: status before attach, attach, status
@@ -111,7 +109,7 @@ Env vars for the bootstrap itself, both optional:
 | Var | Default | Purpose |
 |---|---|---|
 | `SAP_LOGON_EXE` | `C:\Program Files (x86)\SAP\FrontEnd\SapGui\saplogon.exe` | Path used to launch SAP Logon if it isn't already running. |
-| `SAP_CONNECTION` | `A4H` | Local Workspace entry name opened via `windows: openSapConnection` if nothing is open yet. |
+| `SAP_CONNECTION` | `A4H` | Connection entry name double-clicked in the SAP Logon window if nothing is open yet. |
 
 This is basic wiring coverage — is each `sap.*` verb reachable end to end at all —
 not full behavioral coverage of every `GuiComponent` type (`GuiGridView` /

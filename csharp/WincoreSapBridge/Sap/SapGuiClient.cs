@@ -141,42 +141,6 @@ internal sealed class SapGuiClient : IDisposable
         return _engine;
     }
 
-    /// <summary>
-    /// Opens a new SAP connection by its Local Workspace entry name (as configured in SAP
-    /// Logon / <c>saplogon.ini</c>, e.g. <c>"A4H"</c>) and selects its first session —
-    /// the scripting-API equivalent of double-clicking the connection in SAP Logon. Only
-    /// needs <c>saplogon.exe</c> running, not an already-open connection, so it is what
-    /// makes an unattended cold start (backend up, nothing manually opened yet) possible.
-    /// The scripting API's <c>GuiApplication.OpenConnection</c> blocks until the new
-    /// session's initial screen has loaded.
-    /// </summary>
-    public object OpenConnection(string connectionName)
-    {
-        var engine = EnsureEngine();
-        Disp connection;
-        try
-        {
-            connection = engine.GetObj("OpenConnection", connectionName);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"Could not open SAP connection '{connectionName}'. Check it matches a Local Workspace entry " +
-                $"name in SAP Logon exactly. Underlying error: {ex.Message}", ex);
-        }
-
-        var sessions = connection.GetObj("Children");
-        _session = sessions.GetObj("ElementAt", 0);
-
-        return new
-        {
-            opened = true,
-            connectionName,
-            system = connection.GetString("Description"),
-            sessionInfo = DescribeSessionInfo(_session),
-        };
-    }
-
     private static object? DescribeSessionInfo(Disp session)
     {
         try

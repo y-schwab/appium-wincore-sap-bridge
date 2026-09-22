@@ -8,8 +8,8 @@ import { createSapGuiSession, quitSession, bootstrapSapSession } from './helpers
  *
  * Cold-start friendly: the only precondition is the SAP backend itself already being
  * up (the ABAP container — see README, appium-wincore-test-apps sibling repo, sap/).
- * `bootstrapSapSession` launches SAP Logon and opens the connection if neither is
- * already running/open.
+ * The session launches SAP Logon itself, and `bootstrapSapSession` opens the
+ * connection from the SAP Logon window if nothing is open yet.
  */
 describe('sap-bridge attach', () => {
     let driver: Browser;
