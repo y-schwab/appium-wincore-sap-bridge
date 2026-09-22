@@ -47,6 +47,12 @@ const status = await driver.executeScript('windows: attachSapGui', [{ connection
 // { attached: true, connectionCount, sessionCount, system, sessionInfo: { user, transaction, program, ... } }
 // or { attached: false, reason: 'no_open_connection', ... } if nobody is logged in yet
 
+// Cold start — SAP Logon not even open yet, only the backend is up: launch
+// SAP Logon yourself (or see test/e2e/helpers/session.ts ensureSaplogonRunning for
+// a spawn-and-poll helper), then open a connection before attaching:
+// await driver.executeScript('windows: openSapConnection', ['A4H']);
+// await driver.executeScript('windows: attachSapGui', [{}]);
+
 const id = await driver.executeScript('windows: sapFindElement', ['wnd[0]/usr/txtRSYST-BNAME']);
 await driver.executeScript('windows: sapSetValue', [id, 'myuser']);
 await driver.executeScript('windows: sapSendVKey', [0]); // Enter
@@ -55,6 +61,7 @@ await driver.executeScript('windows: sapSendVKey', [0]); // Enter
 | Command | Params | Description |
 |---|---|---|
 | `windows: attachSapGui` | `connectionIndex?`, `sessionIndex?` | Bind to the SAP GUI scripting engine and select a session. |
+| `windows: openSapConnection` | `connectionName` | Open a connection by its SAP Logon "Local Workspace" entry name (e.g. `"A4H"`) — the scripting-API equivalent of double-clicking it. Only needs `saplogon.exe` running, not an already-open connection. |
 | `windows: detachSapGui` | — | Drop the SAP session reference. |
 | `windows: sapGuiStatus` | — | `{ attached: boolean }`. |
 | `windows: sapPageSource` | `contextElementId?` | XML dump of the SAP component tree (defaults to the active window). |
@@ -76,9 +83,13 @@ nodes are virtualised (not real children) and are emitted as synthetic `GridRow`
 
 ## Testing
 
-`test/e2e/` has three suites. All need SAP Logon running with an open,
-scripting-enabled session — see the ABAP backend in the `appium-wincore-test-apps`
-sibling repo, `sap/` — and will fail (not skip) without one:
+`test/e2e/` has three suites, and they're **cold-start friendly**: the only thing you
+need already running is the SAP backend itself (the ABAP container — see
+`appium-wincore-test-apps` sibling repo, `sap/`). SAP Logon does not need to be open —
+every suite calls `bootstrapSapSession` (`test/e2e/helpers/session.ts`), which launches
+`saplogon.exe` if it isn't running and opens the connection (`windows:
+openSapConnection`) if nothing is open yet, before attaching. All three fail loudly
+(not skip) if that bootstrap can't succeed.
 
 - `sap-attach.e2e.ts` — connection lifecycle: status before attach, attach, status
   after attach, detach, commands failing cleanly with nothing attached.
@@ -86,12 +97,21 @@ sibling repo, `sap/` — and will fail (not skip) without one:
   well-known field ids: `sap.findElement` (hit and miss), `sap.getProperty` /
   `sap.getText` / `sap.getTagName` / `sap.getRect`, a `sap.setValue` round trip (value
   is restored after), and `sap.evaluateXPath` (single and `multiple: true`). Needs a
-  **logged-out** session — it never submits the login form.
+  **logged-out** session — it never submits the login form. A fresh cold-start
+  connection lands here naturally; if a connection was already open AND already
+  logged in, this suite fails — log off first in that case.
 - `sap-login.e2e.ts` — fills client/user/password and `sendVKey`s Enter, then checks
   the login fields are gone. Idempotent (passes as a no-op if already logged in) but
   does **not** log off afterward, so run `sap-interaction.e2e.ts` first (or against a
   separate logged-out session) if you want both in one pass. Needs `SAP_USER` /
   `SAP_PASSWORD` env vars — no default; `SAP_CLIENT` is optional.
+
+Env vars for the bootstrap itself, both optional:
+
+| Var | Default | Purpose |
+|---|---|---|
+| `SAP_LOGON_EXE` | `C:\Program Files (x86)\SAP\FrontEnd\SapGui\saplogon.exe` | Path used to launch SAP Logon if it isn't already running. |
+| `SAP_CONNECTION` | `A4H` | Local Workspace entry name opened via `windows: openSapConnection` if nothing is open yet. |
 
 This is basic wiring coverage — is each `sap.*` verb reachable end to end at all —
 not full behavioral coverage of every `GuiComponent` type (`GuiGridView` /

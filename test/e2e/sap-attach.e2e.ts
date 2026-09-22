@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { Browser } from 'webdriverio';
-import { createSapGuiSession, quitSession } from './helpers/session.js';
+import { createSapGuiSession, quitSession, bootstrapSapSession } from './helpers/session.js';
 
 /**
  * Connection lifecycle only — no element interaction. See sap-interaction.e2e.ts for
  * find/read/write coverage.
  *
- * Needs SAP Logon running with an open SAP session (scripting enabled) — see README
- * (appium-wincore-test-apps sibling repo, sap/, stands up the backend).
+ * Cold-start friendly: the only precondition is the SAP backend itself already being
+ * up (the ABAP container — see README, appium-wincore-test-apps sibling repo, sap/).
+ * `bootstrapSapSession` launches SAP Logon and opens the connection if neither is
+ * already running/open.
  */
 describe('sap-bridge attach', () => {
     let driver: Browser;
@@ -26,19 +28,8 @@ describe('sap-bridge attach', () => {
     });
 
     it('attaches to the running SAP GUI scripting engine', async () => {
-        const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]) as {
-            attached: boolean;
-            reason?: string;
-            sessionInfo?: { systemName: string; user: string };
-        };
-
-        if (!status.attached) {
-            // Engine reachable but nobody logged in — a real (if incomplete) result, not a
-            // harness failure. Surface it so a misconfigured backend is easy to diagnose.
-            expect(status.reason).toBe('no_open_connection');
-            return;
-        }
-
+        const status = await bootstrapSapSession(driver);
+        expect(status.attached).toBe(true);
         expect(status.sessionInfo).toBeDefined();
 
         const afterAttach = await driver.executeScript('windows: sapGuiStatus', []) as { attached: boolean };
@@ -46,10 +37,7 @@ describe('sap-bridge attach', () => {
     });
 
     it('detach drops the session and subsequent sap commands fail', async () => {
-        const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]) as { attached: boolean };
-        if (!status.attached) {
-            return; // covered by the attach test above
-        }
+        await bootstrapSapSession(driver);
 
         await driver.executeScript('windows: detachSapGui', []);
         const afterDetach = await driver.executeScript('windows: sapGuiStatus', []) as { attached: boolean };

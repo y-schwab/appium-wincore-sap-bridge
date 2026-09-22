@@ -54,39 +54,7 @@ internal sealed class SapGuiClient : IDisposable
     /// <param name="sessionIndex">Which session within that connection, default 0.</param>
     public object Attach(int connectionIndex = 0, int sessionIndex = 0)
     {
-        // BindToMoniker + GetScriptingEngine trigger SAP's "a script is attaching" modal
-        // when the client notification option is left on; the watchdog clicks it away so
-        // an unattended attach doesn't hang. On a correctly configured machine the modal
-        // never appears and the watchdog is a no-op.
-        var engine = SapDialogWatchdog.Guard(() =>
-        {
-            object comObject;
-            try
-            {
-                comObject = Marshal.BindToMoniker(Moniker);
-            }
-            catch (COMException ex)
-            {
-                throw new InvalidOperationException(
-                    "Could not bind to the SAP GUI scripting engine. Is SAP Logon (saplogon.exe) running? " +
-                    $"(0x{ex.HResult:X8}: {ex.Message})", ex);
-            }
-
-            var sapgui = new Disp(comObject);
-            try
-            {
-                return sapgui.GetObj("GetScriptingEngine");
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    "SAP GUI is running but scripting could not be started. Enable it in SAP GUI Options → " +
-                    "Accessibility & Scripting → Scripting (client side), and ensure the server profile " +
-                    $"parameter sapgui/user_scripting is TRUE. Underlying error: {ex.Message}", ex);
-            }
-        });
-
-        _engine = engine;
+        var engine = EnsureEngine();
 
         var connections = engine.GetObj("Children");
         int connectionCount = connections.GetInt("Count");
@@ -123,6 +91,87 @@ internal sealed class SapGuiClient : IDisposable
             sessionCount,
             connectionIndex,
             sessionIndex,
+            system = connection.GetString("Description"),
+            sessionInfo = DescribeSessionInfo(_session),
+        };
+    }
+
+    /// <summary>
+    /// Binds to the running SAP GUI scripting engine (<c>Marshal.BindToMoniker("SAPGUI")</c>
+    /// → <c>GetScriptingEngine</c>), caching the result. Requires <c>saplogon.exe</c> to
+    /// already be running — the moniker is only registered by a live process — and requires
+    /// no open connection at all, unlike <see cref="Attach"/>.
+    /// </summary>
+    private Disp EnsureEngine()
+    {
+        if (_engine != null) return _engine;
+
+        // BindToMoniker + GetScriptingEngine trigger SAP's "a script is attaching" modal
+        // when the client notification option is left on; the watchdog clicks it away so
+        // an unattended attach doesn't hang. On a correctly configured machine the modal
+        // never appears and the watchdog is a no-op.
+        _engine = SapDialogWatchdog.Guard(() =>
+        {
+            object comObject;
+            try
+            {
+                comObject = Marshal.BindToMoniker(Moniker);
+            }
+            catch (COMException ex)
+            {
+                throw new InvalidOperationException(
+                    "Could not bind to the SAP GUI scripting engine. Is SAP Logon (saplogon.exe) running? " +
+                    $"(0x{ex.HResult:X8}: {ex.Message})", ex);
+            }
+
+            var sapgui = new Disp(comObject);
+            try
+            {
+                return sapgui.GetObj("GetScriptingEngine");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "SAP GUI is running but scripting could not be started. Enable it in SAP GUI Options → " +
+                    "Accessibility & Scripting → Scripting (client side), and ensure the server profile " +
+                    $"parameter sapgui/user_scripting is TRUE. Underlying error: {ex.Message}", ex);
+            }
+        });
+
+        return _engine;
+    }
+
+    /// <summary>
+    /// Opens a new SAP connection by its Local Workspace entry name (as configured in SAP
+    /// Logon / <c>saplogon.ini</c>, e.g. <c>"A4H"</c>) and selects its first session —
+    /// the scripting-API equivalent of double-clicking the connection in SAP Logon. Only
+    /// needs <c>saplogon.exe</c> running, not an already-open connection, so it is what
+    /// makes an unattended cold start (backend up, nothing manually opened yet) possible.
+    /// The scripting API's <c>GuiApplication.OpenConnection</c> blocks until the new
+    /// session's initial screen has loaded.
+    /// </summary>
+    public object OpenConnection(string connectionName)
+    {
+        var engine = EnsureEngine();
+        Disp connection;
+        try
+        {
+            connection = engine.GetObj("OpenConnection", connectionName);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not open SAP connection '{connectionName}'. Check it matches a Local Workspace entry " +
+                $"name in SAP Logon exactly. Underlying error: {ex.Message}", ex);
+        }
+
+        var sessions = connection.GetObj("Children");
+        _session = sessions.GetObj("ElementAt", 0);
+
+        return new
+        {
+            opened = true,
+            connectionName,
             system = connection.GetString("Description"),
             sessionInfo = DescribeSessionInfo(_session),
         };

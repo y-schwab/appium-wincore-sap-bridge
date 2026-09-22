@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Browser } from 'webdriverio';
-import { createSapGuiSession, quitSession } from './helpers/session.js';
+import { createSapGuiSession, quitSession, bootstrapSapSession } from './helpers/session.js';
 
 /**
  * Exercises a real login: fill client/user/password on the SAP Logon screen,
@@ -39,13 +39,7 @@ describe('sap-bridge login', () => {
         }
 
         driver = await createSapGuiSession();
-        const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]) as {
-            attached: boolean;
-            reason?: string;
-        };
-        if (!status.attached) {
-            throw new Error(`sap.attach failed: ${status.reason ?? 'unknown reason'} — is SAP Logon open?`);
-        }
+        await bootstrapSapSession(driver);
     });
 
     afterAll(async () => {

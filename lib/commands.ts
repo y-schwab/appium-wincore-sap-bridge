@@ -35,6 +35,23 @@ export async function attachSapGui(
     });
 }
 
+/**
+ * `windows: openSapConnection` — open a connection by its Local Workspace entry name
+ * (as configured in SAP Logon / `saplogon.ini`, e.g. `"A4H"`) and select its first
+ * session, the scripting-API equivalent of double-clicking the connection in SAP
+ * Logon. Only needs `saplogon.exe` running — no connection has to already be open —
+ * so this plus `windows: attachSapGui` is what makes an unattended cold start
+ * possible (backend up, nothing manually opened in SAP Logon yet).
+ */
+export async function openSapConnection(
+    this: unknown,
+    _next: NextPluginCallback,
+    driver: ExternalDriver,
+    connectionName: string,
+): Promise<unknown> {
+    return send(driver, 'sap.openConnection', { connectionName });
+}
+
 /** `windows: detachSapGui` — drop the SAP session reference. */
 export async function detachSapGui(this: unknown, _next: NextPluginCallback, driver: ExternalDriver): Promise<unknown> {
     return send(driver, 'sap.detach');

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Browser } from 'webdriverio';
-import { createSapGuiSession, quitSession } from './helpers/session.js';
+import { createSapGuiSession, quitSession, bootstrapSapSession } from './helpers/session.js';
 
 /**
  * Find / read / write against the SAP Logon screen — the one screen guaranteed to be
@@ -9,9 +9,12 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  * wired end to end at all, not full behavioral coverage of every GuiComponent type —
  * expand per-control-type cases once this is green against a real backend.
  *
- * Needs SAP Logon running, attached at the login screen (client/user/password/language
- * fields empty or already-attempted — this suite only reads and restores, never
- * submits). See README (appium-wincore-test-apps sibling repo, sap/, stands up the backend).
+ * Cold-start friendly (see helpers/session.ts bootstrapSapSession): only needs the
+ * SAP backend itself already up. If SAP Logon opens a *fresh* connection (nothing
+ * running yet, or nothing open in an already-running SAP Logon), that connection
+ * naturally lands on the login screen this suite expects. If a connection was
+ * already open AND already logged past the login screen, these tests will fail —
+ * log off first in that case.
  */
 const LOGIN_USER_FIELD = 'wnd[0]/usr/txtRSYST-BNAME';
 const LOGIN_CLIENT_FIELD = 'wnd[0]/usr/txtRSYST-MANDT';
@@ -21,13 +24,7 @@ describe('sap-bridge interaction', () => {
 
     beforeAll(async () => {
         driver = await createSapGuiSession();
-        const status = await driver.executeScript('windows: attachSapGui', [{ connectionIndex: 0, sessionIndex: 0 }]) as {
-            attached: boolean;
-            reason?: string;
-        };
-        if (!status.attached) {
-            throw new Error(`sap.attach failed: ${status.reason ?? 'unknown reason'} — is SAP Logon open at the login screen?`);
-        }
+        await bootstrapSapSession(driver);
     });
 
     afterAll(async () => {

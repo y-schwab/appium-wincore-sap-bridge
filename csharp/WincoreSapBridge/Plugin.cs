@@ -8,7 +8,7 @@ namespace Wincore.SapBridge;
 /// <summary>
 /// Server plugin for SAP GUI for Windows — loaded by WincoreServer's PluginLoader
 /// from this package's <c>native/plugin/</c> folder (on
-/// <c>WINCORE_SERVER_PLUGINS</c>). Contributes 16 <c>sap.*</c> commands (reached
+/// <c>WINCORE_SERVER_PLUGINS</c>). Contributes 17 <c>sap.*</c> commands (reached
 /// client-side via <c>windows: attachSapGui</c> plus this package's <c>lib/</c>
 /// helpers) and a tree provider for the <c>sap:</c> element-id namespace.
 ///
@@ -47,6 +47,7 @@ public sealed class Plugin : IServerPlugin
     public IReadOnlyDictionary<string, PluginCommandHandler> GetCommands() => new Dictionary<string, PluginCommandHandler>
     {
         ["sap.attach"] = Attach,
+        ["sap.openConnection"] = OpenConnection,
         ["sap.detach"] = Detach,
         ["sap.status"] = Status,
         ["sap.pageSource"] = PageSource,
@@ -72,6 +73,15 @@ public sealed class Plugin : IServerPlugin
         int sessionIndex = GetInt(parameters, "sessionIndex", 0);
         var result = Provider.Attach(connectionIndex, sessionIndex);
         ctx.LogInfo("[sap-bridge] attach: connection=" + connectionIndex + " session=" + sessionIndex);
+        return result;
+    }
+
+    private object? OpenConnection(ISessionContext ctx, JsonElement? parameters)
+    {
+        var name = GetString(parameters, "connectionName")
+            ?? throw new ArgumentException("sap.openConnection requires 'connectionName'.");
+        var result = Provider.OpenConnection(name);
+        ctx.LogInfo("[sap-bridge] openConnection: " + name);
         return result;
     }
 
@@ -199,6 +209,12 @@ internal sealed class SapTreeProvider : ITreeProvider
     {
         _client ??= new SapGuiClient();
         return _client.Attach(connectionIndex, sessionIndex);
+    }
+
+    internal object? OpenConnection(string connectionName)
+    {
+        _client ??= new SapGuiClient();
+        return _client.OpenConnection(connectionName);
     }
 
     internal void Detach()
