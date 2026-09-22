@@ -76,24 +76,34 @@ nodes are virtualised (not real children) and are emitted as synthetic `GridRow`
 
 ## Testing
 
-`test/e2e/` has two suites. Both need SAP Logon running with an open,
+`test/e2e/` has three suites. All need SAP Logon running with an open,
 scripting-enabled session — see the ABAP backend in the `appium-wincore-test-apps`
 sibling repo, `sap/` — and will fail (not skip) without one:
 
 - `sap-attach.e2e.ts` — connection lifecycle: status before attach, attach, status
   after attach, detach, commands failing cleanly with nothing attached.
-- `sap-interaction.e2e.ts` — find/read/write against the SAP Logon screen's
+- `sap-interaction.e2e.ts` — find/read/write against the SAP **Logon screen**'s
   well-known field ids: `sap.findElement` (hit and miss), `sap.getProperty` /
   `sap.getText` / `sap.getTagName` / `sap.getRect`, a `sap.setValue` round trip (value
-  is restored after), and `sap.evaluateXPath` (single and `multiple: true`).
+  is restored after), and `sap.evaluateXPath` (single and `multiple: true`). Needs a
+  **logged-out** session — it never submits the login form.
+- `sap-login.e2e.ts` — fills client/user/password and `sendVKey`s Enter, then checks
+  the login fields are gone. Idempotent (passes as a no-op if already logged in) but
+  does **not** log off afterward, so run `sap-interaction.e2e.ts` first (or against a
+  separate logged-out session) if you want both in one pass. Needs `SAP_USER` /
+  `SAP_PASSWORD` env vars — no default; `SAP_CLIENT` is optional.
 
 This is basic wiring coverage — is each `sap.*` verb reachable end to end at all —
 not full behavioral coverage of every `GuiComponent` type (`GuiGridView` /
 `GuiComboBox` / `GuiTree` cases etc. still need adding once this is green).
 
 ```bash
-npm run test:e2e
+SAP_USER=... SAP_PASSWORD=... npm run test:e2e
 ```
+
+`sap-login.e2e.ts` fails (not skips) if `SAP_USER`/`SAP_PASSWORD` are unset — run it on its
+own with `npx vitest run --config vitest.e2e.config.ts sap-attach sap-interaction` to skip
+the login suite deliberately.
 
 ## Build from source
 
