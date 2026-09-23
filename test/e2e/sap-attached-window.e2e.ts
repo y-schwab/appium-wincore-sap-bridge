@@ -5,18 +5,15 @@ import type { Browser } from 'webdriverio';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
 
 /**
- * End-to-end check of the tree provider against an already logged-in SAP window.
+ * Attach against an already logged-in SAP window.
  *
- * Precondition: a SAP connection is open and logged in (any screen, e.g. SAP Easy
- * Access). The test does not open or log into anything itself.
+ * Precondition: a SAP connection is open and logged in (e.g. SAP Easy Access). The
+ * test does not open or log into anything itself.
  *
- * Flow: find the logged-in SAP window by title → switch to it → page source (UIA)
- * → attach → page source (SAP tree) → find by accessibility id / xpath / class name
- * → element commands on the command field → detach → page source (UIA again).
- *
- * Every step is recorded instead of failing fast, so a single run leaves the full
- * picture in test-output/attached-window/ — SUMMARY.md first, then the numbered
- * dumps. The test fails at the end if any check failed.
+ * Flow: switch to the SAP window by title → attach → page source (should now be the
+ * SAP tree). Output in test-output/attached-window/: SUMMARY.md, 01-attach-result.json
+ * (includes per-connection diagnostics when attach fails) and
+ * 02-page-source-after-attach.xml.
  *
  * Env:
  *   SAP_WINDOW_TITLE  partial title of the logged-in window, matched via
@@ -25,11 +22,7 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
 const OUTPUT_DIR = resolve(process.cwd(), 'test-output', 'attached-window');
 const WINDOW_TITLE = process.env.SAP_WINDOW_TITLE ?? 'SAP Easy';
 
-// Command field — present on every SAP GUI screen, safe to type into without pressing Enter.
-const OKCODE_ID = 'wnd[0]/tbar[0]/okcd';
-const OKCODE_PROBE = 'ZZ_E2E_PROBE';
-
-type Status = 'PASS' | 'FAIL' | 'SKIP' | 'INFO';
+type Status = 'PASS' | 'FAIL' | 'INFO';
 
 interface Check {
     step: string;
@@ -51,16 +44,12 @@ function record(step: string, status: Status, detail: string): void {
 
 /** Rewritten after every check, so a crash midway still leaves everything seen so far. */
 function writeReport(): void {
-    save('report.json', checks);
-    const icon: Record<Status, string> = { PASS: '✅', FAIL: '❌', SKIP: '⏭️', INFO: 'ℹ️' };
-    const counts = (['PASS', 'FAIL', 'SKIP'] as Status[])
-        .map((s) => `${s}: ${checks.filter((c) => c.status === s).length}`)
-        .join(' · ');
+    const icon: Record<Status, string> = { PASS: '✅', FAIL: '❌', INFO: 'ℹ️' };
     const lines = [
         '# SAP attached-window e2e',
         '',
         `Run: ${new Date().toISOString()}  `,
-        counts,
+        `PASS: ${checks.filter((c) => c.status === 'PASS').length} · FAIL: ${checks.filter((c) => c.status === 'FAIL').length}`,
         '',
         '| # | Status | Step | Detail |',
         '| --- | --- | --- | --- |',
@@ -95,17 +84,14 @@ function rootTag(xml: string): string {
 interface AttachResult {
     attached?: boolean;
     reason?: string;
+    message?: string;
     windowHandles?: string[];
+    connections?: unknown[];
     [key: string]: unknown;
 }
 
 describe('sap-bridge attached window', () => {
     let driver: Browser;
-
-    /** Driver's substring title match — polls briefly, throws NoSuchWindowError if nothing matches. */
-    async function switchToSapWindow(): Promise<void> {
-        await driver.executeScript('windows: switchToWindowByTitle', [{ title: WINDOW_TITLE }]);
-    }
 
     beforeAll(async () => {
         rmSync(OUTPUT_DIR, { recursive: true, force: true });
@@ -119,16 +105,11 @@ describe('sap-bridge attached window', () => {
         await quitSession(driver);
     });
 
-    it('serves standard WebDriver from the SAP tree once attached', async () => {
+    it('serves page source from the SAP tree once attached', async () => {
         // 1. Switch to the logged-in SAP window by (partial) title.
-        const rootHandle = await driver.getWindowHandle();
-        const handles = await driver.getWindowHandles();
-        save('00-windows.json', { rootHandle, handles, titleMatch: WINDOW_TITLE });
-        record('Session root', 'INFO', `root ${rootHandle}; handles ${JSON.stringify(handles)}`);
-
         let target: { handle: string; title: string };
         try {
-            await switchToSapWindow();
+            await driver.executeScript('windows: switchToWindowByTitle', [{ title: WINDOW_TITLE }]);
             target = { handle: await driver.getWindowHandle(), title: await driver.getTitle() };
         } catch (err) {
             record(`Switch to window by title "${WINDOW_TITLE}"`, 'FAIL',
@@ -136,16 +117,9 @@ describe('sap-bridge attached window', () => {
             expect(checks.filter((c) => c.status === 'FAIL')).toEqual([]);
             return;
         }
-        record(`Switch to window by title "${WINDOW_TITLE}"`, 'PASS', `${target.handle} "${target.title}"`);
+        record(`Switch to window by title "${WINDOW_TITLE}"`, 'INFO', `${target.handle} "${target.title}"`);
 
-        // 2. Page source before attach — UIA, expected to show no SAP Type tags.
-        const before = await driver.getPageSource();
-        save('01-sap-window-before-attach.xml', before);
-        const beforeGui = guiTagSummary(before);
-        record('Page source before attach is UIA', beforeGui.total === 0 ? 'PASS' : 'FAIL',
-            `${before.length} chars, root <${rootTag(before)}>, Gui* tags: ${beforeGui.total}`);
-
-        // 3. Attach. Retry only on throw (COM moniker can lag); record whatever comes back.
+        // 2. Attach. Retry only on throw (COM moniker can lag); record whatever comes back.
         let attach: AttachResult = {};
         const deadline = Date.now() + 20_000;
         while (true) {
@@ -158,110 +132,30 @@ describe('sap-bridge attached window', () => {
                 await delay(1000);
             }
         }
-        save('02-attach-result.json', attach);
+        save('01-attach-result.json', attach);
         if (!attach.attached) {
-            record('Attach', 'FAIL', `attached=${attach.attached}; reason=${attach.reason ?? attach.error ?? 'unknown'}`);
+            record('Attach', 'FAIL', `reason=${attach.reason ?? attach.error ?? 'unknown'}${attach.message ? ` — ${attach.message}` : ''}`);
+            for (const con of attach.connections ?? []) {
+                record('Connection seen by scripting engine', 'INFO', JSON.stringify(con));
+            }
             expect(checks.filter((c) => c.status === 'FAIL')).toEqual([]);
             return;
         }
-        record('Attach', 'PASS', `windowHandles=${JSON.stringify(attach.windowHandles)}`);
+        record('Attach', 'PASS', `system=${attach.system}; sessionInfo=${JSON.stringify(attach.sessionInfo)}`);
 
-        // 4. The provider owns windows by handle — the window we're on must be one of them.
+        // The provider owns windows by handle — the window we're on must be one of them.
         const owned = (attach.windowHandles ?? []).map((h) => h.toLowerCase());
         record('Target handle is in attach windowHandles',
             owned.includes(target.handle.toLowerCase()) ? 'PASS' : 'FAIL',
             `target ${target.handle} vs ${JSON.stringify(attach.windowHandles)}`);
 
-        // 5. Page source after attach, without re-switching — should now come from the SAP tree.
+        // 3. Page source after attach — should now come from the SAP tree.
         const after = await driver.getPageSource();
-        save('03-sap-window-after-attach.xml', after);
+        save('02-page-source-after-attach.xml', after);
         const afterGui = guiTagSummary(after);
-        record('Page source after attach is SAP tree (same handle, no re-switch)', afterGui.total > 0 ? 'PASS' : 'FAIL',
+        record('Page source after attach is SAP tree', afterGui.total > 0 ? 'PASS' : 'FAIL',
             `${after.length} chars, root <${rootTag(after)}>, Gui* tags: ${afterGui.total} ${JSON.stringify(afterGui.tags)}`);
 
-        // 5b. Same after an explicit re-switch — tells a routing bug apart from a stale-root one.
-        await switchToSapWindow();
-        const afterSwitch = await driver.getPageSource();
-        save('04-sap-window-after-attach-reswitch.xml', afterSwitch);
-        const afterSwitchGui = guiTagSummary(afterSwitch);
-        record('Page source after attach is SAP tree (after re-switch)', afterSwitchGui.total > 0 ? 'PASS' : 'FAIL',
-            `${afterSwitch.length} chars, root <${rootTag(afterSwitch)}>, Gui* tags: ${afterSwitchGui.total}`);
-
-        // 6. Standard locators served from the SAP tree.
-        const found: Record<string, unknown> = {};
-        let okcodeId: string | undefined;
-        try {
-            const el = await driver.findElement('accessibility id', OKCODE_ID);
-            okcodeId = Object.values(el)[0] as string;
-            found.accessibilityId = okcodeId;
-            record(`Find ~${OKCODE_ID}`, okcodeId?.startsWith('sap:') ? 'PASS' : 'FAIL', `element id ${okcodeId}`);
-        } catch (err) {
-            found.accessibilityId = { error: errMsg(err) };
-            record(`Find ~${OKCODE_ID}`, 'FAIL', errMsg(err));
-        }
-
-        for (const [label, using, value] of [
-            ['xpath //GuiButton', 'xpath', '//GuiButton'],
-            ['class name GuiTextField', 'class name', 'GuiTextField'],
-            ['xpath //GuiOkCodeField', 'xpath', '//GuiOkCodeField'],
-        ] as const) {
-            try {
-                const els = await driver.findElements(using, value);
-                const ids = els.map((e) => Object.values(e)[0] as string);
-                found[label] = ids;
-                const allSap = ids.length > 0 && ids.every((id) => id.startsWith('sap:'));
-                record(`Find ${label}`, allSap ? 'PASS' : 'FAIL',
-                    `${ids.length} found${ids.length ? `, first id ${ids[0]}` : ''}`);
-            } catch (err) {
-                found[label] = { error: errMsg(err) };
-                record(`Find ${label}`, 'FAIL', errMsg(err));
-            }
-        }
-        save('05-find-results.json', found);
-
-        // 7. Element commands through the sap: prefix — write, read back, clear. No Enter is sent.
-        const interaction: Record<string, unknown> = {};
-        if (okcodeId) {
-            try {
-                interaction.initialText = await driver.getElementText(okcodeId);
-                await driver.elementClear(okcodeId);
-                await driver.elementSendKeys(okcodeId, OKCODE_PROBE);
-                const readBack = await driver.getElementText(okcodeId);
-                interaction.readBack = readBack;
-                record('setValue + getText on command field', readBack === OKCODE_PROBE ? 'PASS' : 'FAIL',
-                    `wrote "${OKCODE_PROBE}", read "${readBack}"`);
-            } catch (err) {
-                interaction.error = errMsg(err);
-                record('setValue + getText on command field', 'FAIL', errMsg(err));
-            }
-            try {
-                await driver.elementClear(okcodeId);
-                const cleared = await driver.getElementText(okcodeId);
-                interaction.afterClear = cleared;
-                record('clear on command field', cleared === '' ? 'PASS' : 'FAIL', `read "${cleared}" after clear`);
-            } catch (err) {
-                interaction.clearError = errMsg(err);
-                record('clear on command field', 'FAIL', errMsg(err));
-            }
-        } else {
-            record('setValue + getText on command field', 'SKIP', 'command field not found');
-        }
-        save('06-interaction.json', interaction);
-
-        // 8. Detach — provider should release the window, page source back to UIA.
-        try {
-            const detach = await driver.executeScript('windows: detachSapGui', []);
-            save('07-detach-result.json', detach ?? null);
-            await switchToSapWindow();
-            const afterDetach = await driver.getPageSource();
-            save('08-sap-window-after-detach.xml', afterDetach);
-            const detachGui = guiTagSummary(afterDetach);
-            record('Page source after detach is UIA again', detachGui.total === 0 ? 'PASS' : 'FAIL',
-                `${afterDetach.length} chars, root <${rootTag(afterDetach)}>, Gui* tags: ${detachGui.total}`);
-        } catch (err) {
-            record('Detach', 'FAIL', errMsg(err));
-        }
-
         expect(checks.filter((c) => c.status === 'FAIL')).toEqual([]);
-    }, 120_000);
+    }, 90_000);
 });

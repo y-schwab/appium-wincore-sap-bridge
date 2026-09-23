@@ -79,8 +79,23 @@ internal sealed class SapGuiClient : IDisposable
         var sessions = connection.GetObj("Children");
         int sessionCount = sessions.GetInt("Count");
         if (sessionIndex < 0 || sessionIndex >= sessionCount)
-            throw new ArgumentOutOfRangeException(nameof(sessionIndex),
-                $"sessionIndex {sessionIndex} out of range (0..{sessionCount - 1}).");
+        {
+            // Not an argument error in practice: a connection that's open but exposes no
+            // sessions (disabled by server, wrong connection picked, still logging on, …).
+            // Report every connection as the engine sees it so the cause is visible.
+            _session = null;
+            return new
+            {
+                attached = false,
+                reason = sessionCount == 0 ? "no_session_in_connection" : "session_index_out_of_range",
+                message = $"Connection {connectionIndex} exposes {sessionCount} session(s); sessionIndex {sessionIndex} " +
+                          "is not available. See 'connections' for what the scripting engine sees.",
+                connectionCount,
+                connectionIndex,
+                sessionIndex,
+                connections = DescribeConnections(connections, connectionCount),
+            };
+        }
 
         _session = sessions.GetObj("ElementAt", sessionIndex);
 
@@ -161,6 +176,41 @@ internal sealed class SapGuiClient : IDisposable
             };
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Diagnostic snapshot of every open connection for a failed attach. Reads raw
+    /// values (not <see cref="Disp.GetInt"/>, which turns a throw into 0) so a COM
+    /// error is reported as such rather than as "0 sessions".
+    /// </summary>
+    private static object[] DescribeConnections(Disp connections, int connectionCount)
+    {
+        static object? Try(Func<object?> read)
+        {
+            try { return read(); }
+            catch (Exception ex) { return $"error: {ex.GetBaseException().Message}"; }
+        }
+
+        var result = new object[connectionCount];
+        for (int i = 0; i < connectionCount; i++)
+        {
+            int index = i;
+            result[i] = Try(() =>
+            {
+                var con = connections.GetObj("ElementAt", index);
+                return new
+                {
+                    index,
+                    id = Try(() => con.Get("Id")),
+                    description = Try(() => con.Get("Description")),
+                    connectionString = Try(() => con.Get("ConnectionString")),
+                    disabledByServer = Try(() => con.Get("DisabledByServer")),
+                    childrenCount = Try(() => con.GetObj("Children").Get("Count")),
+                    sessionsCount = Try(() => con.GetObj("Sessions").Get("Count")),
+                };
+            });
+        }
+        return result;
     }
 
     // ── Element lookup ─────────────────────────────────────────────────────────
