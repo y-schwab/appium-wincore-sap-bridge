@@ -85,7 +85,7 @@ window's page source when attached — into `test-output/`. `sap-attached-window
 expects a SAP connection already open and logged in: it switches to that window, attaches,
 and checks page source, find (accessibility id / xpath / class name), element commands on
 the command field and detach, writing `test-output/attached-window/SUMMARY.md` plus the
-raw dumps. Pick the window with `SAP_WINDOW_TITLE` (title substring) if needed. The attach / interaction /
+raw dumps. It switches with `windows: switchToWindowByTitle` on `SAP_WINDOW_TITLE` (partial match, default `SAP Easy`). The attach / interaction /
 login suites are commented out and excluded in `vitest.e2e.config.ts` until they're
 rebuilt on standard WebDriver commands.
 

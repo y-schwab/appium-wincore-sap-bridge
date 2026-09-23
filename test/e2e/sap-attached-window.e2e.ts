@@ -19,11 +19,11 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  * dumps. The test fails at the end if any check failed.
  *
  * Env:
- *   SAP_WINDOW_TITLE  substring of the logged-in window's title to pick (default: the
- *                     first top-level window whose title doesn't start with "SAP Logon")
+ *   SAP_WINDOW_TITLE  partial title of the logged-in window, matched via
+ *                     `windows: switchToWindowByTitle` (default: "SAP Easy")
  */
 const OUTPUT_DIR = resolve(process.cwd(), 'test-output', 'attached-window');
-const WINDOW_TITLE = process.env.SAP_WINDOW_TITLE;
+const WINDOW_TITLE = process.env.SAP_WINDOW_TITLE ?? 'SAP Easy';
 
 // Command field — present on every SAP GUI screen, safe to type into without pressing Enter.
 const OKCODE_ID = 'wnd[0]/tbar[0]/okcd';
@@ -102,6 +102,11 @@ interface AttachResult {
 describe('sap-bridge attached window', () => {
     let driver: Browser;
 
+    /** Driver's substring title match — polls briefly, throws NoSuchWindowError if nothing matches. */
+    async function switchToSapWindow(): Promise<void> {
+        await driver.executeScript('windows: switchToWindowByTitle', [{ title: WINDOW_TITLE }]);
+    }
+
     beforeAll(async () => {
         rmSync(OUTPUT_DIR, { recursive: true, force: true });
         mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -115,37 +120,25 @@ describe('sap-bridge attached window', () => {
     });
 
     it('serves standard WebDriver from the SAP tree once attached', async () => {
-        // 1. Enumerate top-level windows and pick the logged-in SAP one.
+        // 1. Switch to the logged-in SAP window by (partial) title.
         const rootHandle = await driver.getWindowHandle();
         const handles = await driver.getWindowHandles();
-        const windows: { handle: string; title: string }[] = [];
-        for (const handle of handles) {
-            try {
-                await driver.switchToWindow(handle);
-                windows.push({ handle, title: await driver.getTitle() });
-            } catch (err) {
-                windows.push({ handle, title: `(error: ${errMsg(err)})` });
-            }
-        }
-        save('00-windows.json', { rootHandle, windows });
-        record('Enumerate windows', 'INFO',
-            `root ${rootHandle}; ${windows.map((w) => `${w.handle} "${w.title}"`).join('; ')}`);
+        save('00-windows.json', { rootHandle, handles, titleMatch: WINDOW_TITLE });
+        record('Session root', 'INFO', `root ${rootHandle}; handles ${JSON.stringify(handles)}`);
 
-        const target = WINDOW_TITLE
-            ? windows.find((w) => w.title.includes(WINDOW_TITLE))
-            : windows.find((w) => w.title && !w.title.startsWith('SAP Logon') && !w.title.startsWith('(error'));
-        if (!target) {
-            record('Find logged-in SAP window', 'FAIL',
-                WINDOW_TITLE
-                    ? `No window title contains "${WINDOW_TITLE}"`
-                    : 'No window other than SAP Logon — is a SAP connection open and logged in? (or set SAP_WINDOW_TITLE)');
+        let target: { handle: string; title: string };
+        try {
+            await switchToSapWindow();
+            target = { handle: await driver.getWindowHandle(), title: await driver.getTitle() };
+        } catch (err) {
+            record(`Switch to window by title "${WINDOW_TITLE}"`, 'FAIL',
+                `${errMsg(err)} — is a SAP connection open and logged in? (or set SAP_WINDOW_TITLE)`);
             expect(checks.filter((c) => c.status === 'FAIL')).toEqual([]);
             return;
         }
-        record('Find logged-in SAP window', 'PASS', `${target.handle} "${target.title}"`);
+        record(`Switch to window by title "${WINDOW_TITLE}"`, 'PASS', `${target.handle} "${target.title}"`);
 
         // 2. Page source before attach — UIA, expected to show no SAP Type tags.
-        await driver.switchToWindow(target.handle);
         const before = await driver.getPageSource();
         save('01-sap-window-before-attach.xml', before);
         const beforeGui = guiTagSummary(before);
@@ -187,7 +180,7 @@ describe('sap-bridge attached window', () => {
             `${after.length} chars, root <${rootTag(after)}>, Gui* tags: ${afterGui.total} ${JSON.stringify(afterGui.tags)}`);
 
         // 5b. Same after an explicit re-switch — tells a routing bug apart from a stale-root one.
-        await driver.switchToWindow(target.handle);
+        await switchToSapWindow();
         const afterSwitch = await driver.getPageSource();
         save('04-sap-window-after-attach-reswitch.xml', afterSwitch);
         const afterSwitchGui = guiTagSummary(afterSwitch);
@@ -259,7 +252,7 @@ describe('sap-bridge attached window', () => {
         try {
             const detach = await driver.executeScript('windows: detachSapGui', []);
             save('07-detach-result.json', detach ?? null);
-            await driver.switchToWindow(target.handle);
+            await switchToSapWindow();
             const afterDetach = await driver.getPageSource();
             save('08-sap-window-after-detach.xml', afterDetach);
             const detachGui = guiTagSummary(afterDetach);
