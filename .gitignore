@@ -5,3 +5,5 @@ native/plugin/*
 csharp/**/bin/
 csharp/**/obj/
 *.user
+test-output/
+remote-test-output/

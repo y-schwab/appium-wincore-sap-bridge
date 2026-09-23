@@ -81,7 +81,11 @@ nodes are virtualised (not real children) and are emitted as synthetic `GridRow`
 The e2e suite is currently scaled down to `sap-discovery.e2e.ts`: it launches SAP Logon
 through the driver (`appium:app` = `saplogon.exe`, `appium:noReset` to reuse a running
 instance), attaches, and dumps page source before / after attach — plus the SAP
-window's page source when attached — into `test-output/`. The attach / interaction /
+window's page source when attached — into `test-output/`. `sap-attached-window.e2e.ts`
+expects a SAP connection already open and logged in: it switches to that window, attaches,
+and checks page source, find (accessibility id / xpath / class name), element commands on
+the command field and detach, writing `test-output/attached-window/SUMMARY.md` plus the
+raw dumps. Pick the window with `SAP_WINDOW_TITLE` (title substring) if needed. The attach / interaction /
 login suites are commented out and excluded in `vitest.e2e.config.ts` until they're
 rebuilt on standard WebDriver commands.
 
