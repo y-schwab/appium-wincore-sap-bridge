@@ -454,6 +454,10 @@ internal sealed class SapGuiClient : IDisposable
             el.SetAttribute("Tooltip", Sanitize(component.GetString("Tooltip")));
             el.SetAttribute("Changeable", component.GetBool("Changeable").ToString());
             el.SetAttribute("IconName", component.GetString("IconName"));
+            // Shell controls all report Type "GuiShell"; SubType says which kind (Tree,
+            // GridView, Toolbar, HTMLViewer, …). Only GuiShell has the property.
+            if (type == "GuiShell")
+                el.SetAttribute("SubType", component.GetString("SubType"));
 
             // GuiVComponent screen geometry — absolute screen pixels. SAP has no cheap
             // "root rect" to offset against; the Actions layer can use absolute coords
