@@ -70,11 +70,13 @@ Standard locators map onto SAP scripting properties:
 | `xpath` | full XPath 1.0 over page source |
 
 Page source, XPath, and element ids all use a `sap:` element-id prefix and the SAP
-`Type` string (`GuiTextField`, `GuiButton`, `GuiGridView`, `GuiTree`, …) as the tag
+`Type` string (`GuiTextField`, `GuiButton`, `GuiShell`, …) as the tag
 name — already a stable, language-neutral PascalCase identifier, so no role-mapping
-table is needed the way the Java bridge needs one. `GuiGridView` rows and `GuiTree`
-nodes are virtualised (not real children) and are emitted as synthetic `GridRow` /
-`GridCell` / `TreeNode` elements in page source and XPath.
+table is needed the way the Java bridge needs one. Shell controls (grids, trees, toolbars,
+HTML viewers, …) all report `Type` `GuiShell`; their kind is in a `SubType` attribute
+(`//GuiShell[@SubType='Tree']`). ALV grid rows (`SubType` `GridView`) and tree nodes
+(`SubType` `Tree`) are virtualised (not real children) and are emitted as synthetic
+`GridRow` / `GridCell` / `TreeNode` elements in page source and XPath.
 
 ## Testing
 

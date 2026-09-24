@@ -183,7 +183,7 @@ internal sealed class SapGuiClient : IDisposable
     /// values (not <see cref="Disp.GetInt"/>, which turns a throw into 0) so a COM
     /// error is reported as such rather than as "0 sessions".
     /// </summary>
-    private static object[] DescribeConnections(Disp connections, int connectionCount)
+    private static object?[] DescribeConnections(Disp connections, int connectionCount)
     {
         static object? Try(Func<object?> read)
         {
@@ -191,7 +191,7 @@ internal sealed class SapGuiClient : IDisposable
             catch (Exception ex) { return $"error: {ex.GetBaseException().Message}"; }
         }
 
-        var result = new object[connectionCount];
+        var result = new object?[connectionCount];
         for (int i = 0; i < connectionCount; i++)
         {
             int index = i;
@@ -433,6 +433,7 @@ internal sealed class SapGuiClient : IDisposable
 
         XmlElement el;
         string type;
+        string subType = "";
         try
         {
             var sapId = component.GetString("Id");
@@ -457,7 +458,10 @@ internal sealed class SapGuiClient : IDisposable
             // Shell controls all report Type "GuiShell"; SubType says which kind (Tree,
             // GridView, Toolbar, HTMLViewer, …). Only GuiShell has the property.
             if (type == "GuiShell")
-                el.SetAttribute("SubType", component.GetString("SubType"));
+            {
+                subType = component.GetString("SubType");
+                el.SetAttribute("SubType", subType);
+            }
 
             // GuiVComponent screen geometry — absolute screen pixels. SAP has no cheap
             // "root rect" to offset against; the Actions layer can use absolute coords
@@ -495,22 +499,21 @@ internal sealed class SapGuiClient : IDisposable
         catch { }
 
         // Virtualised controls whose rows/nodes are not children.
-        try { AppendGridRows(doc, el, component, type); } catch { }
-        try { AppendTreeNodes(doc, el, component, type); } catch { }
+        // Grids and trees are shells: Type "GuiShell", kind in SubType ("GridView", "Tree").
+        try { if (subType == "GridView") AppendGridRows(doc, el, component); } catch { }
+        try { if (subType == "Tree") AppendTreeNodes(doc, el, component); } catch { }
 
         return el;
     }
 
     /// <summary>
-    /// <c>GuiGridView</c> (ALV grid) does not expose cells through <c>Children</c> — rows
+    /// <c>GuiGridView</c> (ALV grid — a <c>GuiShell</c> with <c>SubType</c> "GridView") does not expose cells through <c>Children</c> — rows
     /// are virtualised and addressed by index + column id. Emit the visible rows as
     /// <c>GridRow</c> / <c>GridCell</c> children so they show up in page source and are
     /// XPath-addressable. Full row access still needs scrolling via the Actions layer.
     /// </summary>
-    private static void AppendGridRows(XmlDocument doc, XmlElement parent, Disp component, string type)
+    private static void AppendGridRows(XmlDocument doc, XmlElement parent, Disp component)
     {
-        if (type != "GuiGridView") return;
-
         int rowCount = component.GetInt("RowCount");
         int firstVisible = component.GetInt("FirstVisibleRow");
         int visibleRows = component.GetInt("VisibleRowCount");
@@ -540,13 +543,11 @@ internal sealed class SapGuiClient : IDisposable
     }
 
     /// <summary>
-    /// <c>GuiTree</c> nodes are addressed by key, not exposed as <c>Children</c>. Emit the
+    /// <c>GuiTree</c> (a <c>GuiShell</c> with <c>SubType</c> "Tree") nodes are addressed by key, not exposed as <c>Children</c>. Emit the
     /// currently known nodes as <c>TreeNode</c> children.
     /// </summary>
-    private static void AppendTreeNodes(XmlDocument doc, XmlElement parent, Disp component, string type)
+    private static void AppendTreeNodes(XmlDocument doc, XmlElement parent, Disp component)
     {
-        if (type != "GuiTree") return;
-
         var keys = component.CallObjOrNull("GetAllNodeKeys");
         if (keys == null) return;
         int n = keys.GetInt("Count");
