@@ -11,7 +11,8 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  * test does not open or log into anything itself.
  *
  * Flow: switch to the SAP window by title → attach → page source (should now be the
- * SAP tree) → if the screen has a tree (SAP Easy Access does): expand a collapsed
+ * SAP tree) → standard find (accessibility id, XPath, class name) and type / read /
+ * clear on the command field → if the screen has a tree (SAP Easy Access does): expand a collapsed
  * folder and select one of its children. Output in test-output/attached-window/:
  * SUMMARY.md, 01-attach-result.json (includes per-connection diagnostics when attach
  * fails), 02-page-source-after-attach.xml and 03-page-source-after-expand.xml.
@@ -89,6 +90,60 @@ interface AttachResult {
     windowHandles?: string[];
     connections?: unknown[];
     [key: string]: unknown;
+}
+
+// Command field — on every SAP GUI screen, safe to type into as long as Enter is never sent.
+const OKCODE_ID = 'wnd[0]/tbar[0]/okcd';
+const OKCODE_PROBE = 'ZZ_E2E_PROBE';
+
+/**
+ * Standard WebDriver on ordinary SAP components: find by accessibility id (trailing
+ * SAP Id), XPath and class name — every hit must be a sap: element — then write, read
+ * back and clear the command field.
+ */
+async function checkStandardElements(driver: Browser): Promise<void> {
+    const okcd = await driver.$(`~${OKCODE_ID}`);
+    const okcdId = (await okcd.isExisting()) ? await okcd.elementId : undefined;
+    record(`Find ~${OKCODE_ID}`, okcdId?.startsWith('sap:') ? 'PASS' : 'FAIL', `element id ${okcdId ?? '(none)'}`);
+
+    // Raw findElements: in WDIO a ".GuiButton" selector would be CSS, not class name.
+    // GuiButton rather than GuiTextField: SAP Easy Access has no plain text fields.
+    for (const [label, using, value] of [
+        ['xpath //GuiButton', 'xpath', '//GuiButton'],
+        ['xpath //GuiOkCodeField', 'xpath', '//GuiOkCodeField'],
+        ['class name GuiButton', 'class name', 'GuiButton'],
+    ] as const) {
+        try {
+            const els = await driver.findElements(using, value);
+            const ids = els.map((e) => Object.values(e)[0] as string);
+            const allSap = ids.length > 0 && ids.every((id) => id.startsWith('sap:'));
+            record(`Find ${label}`, allSap ? 'PASS' : 'FAIL',
+                `${ids.length} found${ids.length ? `, first id ${ids[0]}` : ''}`);
+        } catch (err) {
+            record(`Find ${label}`, 'FAIL', errMsg(err));
+        }
+    }
+
+    if (!okcdId) {
+        record('Type / read / clear command field', 'FAIL', 'command field not found');
+        return;
+    }
+    // No Enter is sent, so the probe text never runs as a transaction.
+    try {
+        await okcd.setValue(OKCODE_PROBE);
+        const readBack = await okcd.getText();
+        record('setValue + getText on command field', readBack === OKCODE_PROBE ? 'PASS' : 'FAIL',
+            `wrote "${OKCODE_PROBE}", read "${readBack}"`);
+    } catch (err) {
+        record('setValue + getText on command field', 'FAIL', errMsg(err));
+    }
+    try {
+        await okcd.clearValue();
+        const cleared = await okcd.getText();
+        record('clearValue on command field', cleared === '' ? 'PASS' : 'FAIL', `read "${cleared}" after clear`);
+    } catch (err) {
+        record('clearValue on command field', 'FAIL', errMsg(err));
+    }
 }
 
 /**
@@ -212,7 +267,14 @@ describe('sap-bridge attached window', () => {
         record('Page source after attach is SAP tree', afterGui.total > 0 ? 'PASS' : 'FAIL',
             `${after.length} chars, root <${rootTag(after)}>, Gui* tags: ${afterGui.total} ${JSON.stringify(afterGui.tags)}`);
 
-        // 4. Tree nodes: nested under their parents, collapsed folders hide their children.
+        // 4. Standard locators and element commands on ordinary SAP components.
+        try {
+            await checkStandardElements(driver);
+        } catch (err) {
+            record('Standard element checks', 'FAIL', `threw: ${errMsg(err)}`);
+        }
+
+        // 5. Tree nodes: nested under their parents, collapsed folders hide their children.
         const TREE = "//GuiShell[@SubType='Tree']";
         if (!after.includes('SubType="Tree"')) {
             record('Tree nodes', 'INFO', 'no SubType="Tree" shell on this screen — tree checks skipped');
