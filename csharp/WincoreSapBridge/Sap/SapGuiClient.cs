@@ -703,7 +703,7 @@ internal sealed class SapGuiClient : IDisposable
             "id" => RawId(elementId),
             "type" or "tagname" or "classname" or "controltype" or "localizedcontroltype" => "TreeNode",
             "key" => key,
-            "name" or "text" or "value" => tree.GetString("GetNodeTextByKey", key),
+            "text" or "value" => tree.GetString("GetNodeTextByKey", key),
             "isfolder" => IsFolder(),
             "isexpanded" => tree.GetBool("IsFolderExpanded", key),
             // What the driver's windows: expand reads back to confirm the expand took.

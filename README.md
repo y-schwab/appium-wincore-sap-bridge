@@ -78,8 +78,11 @@ HTML viewers, …) all report `Type` `GuiShell`; their kind is in a `SubType` at
 (`SubType` `Tree`) are virtualised (not real children) and are emitted as synthetic
 `GridRow` / `GridCell` / `TreeNode` elements in page source and XPath.
 
-Tree nodes are nested under their parent node and carry `Key`, `Text`, `IsFolder` and
-(folders only) `IsExpanded`. Like a closed dropdown in UIA, a collapsed folder's children
+Tree nodes are nested under their parent node and carry `Text` (the visible label),
+`Key`, `IsFolder` and (folders only) `IsExpanded`. Locate nodes by `@Text`, as with any
+SAP element's label (`Name` is SAP's technical field name, which nodes don't have) — it
+follows the logon language, so fix the language for a test run. `Key` is
+generated per system (e.g. `0000000048` in a user menu), so avoid it in locators. Like a closed dropdown in UIA, a collapsed folder's children
 are not listed until it is expanded. XPath returns nodes as real elements (id
 `sap:<tree shell id>#node:<key>`), so a test can act on them:
 
@@ -91,7 +94,7 @@ await driver.executeScript('windows: select', [{ elementId: editor.elementId }])
 await driver.executeScript('windows: invoke', [{ elementId: editor.elementId }]); // double-click: starts SE38
 ```
 
-`getText`, `getAttribute` (`Key`, `IsFolder`, `IsExpanded`, `ExpandCollapseState`,
+`getText`, `getAttribute` (`Text`, `Key`, `IsFolder`, `IsExpanded`, `ExpandCollapseState`,
 `IsSelected`) work on nodes too. A plain `click()` does not: the scripting API gives no
 screen position for a node, so use `windows: select` / `windows: invoke` instead.
 `windows: collapse` is not routed to bridges by the driver yet.

@@ -107,6 +107,10 @@ async function checkTreeExpand(driver: Browser, tree: string): Promise<void> {
     const text = await folder.getText();
     record('Find collapsed folder by XPath', 'PASS', `"${text}" key=${key} id=${folderId}`);
 
+    const byText = await driver.$(`${tree}//TreeNode[@Text="${text}"]`);
+    const byTextId = (await byText.isExisting()) ? await byText.elementId : '(none)';
+    record('Find folder by Text', byTextId === folderId ? 'PASS' : 'FAIL', `@Text="${text}" → ${byTextId}`);
+
     const childXPath = `${tree}//TreeNode[@Key='${key}']/TreeNode`;
     const before = (await driver.$$(childXPath)).length;
     record('Collapsed folder shows no children', before === 0 ? 'PASS' : 'FAIL', `${before} child TreeNode(s)`);
