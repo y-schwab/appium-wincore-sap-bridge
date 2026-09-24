@@ -123,7 +123,9 @@ async function checkTreeExpand(driver: Browser, tree: string): Promise<void> {
     const expanded = await driver.getPageSource();
     save('03-page-source-after-expand.xml', expanded);
     const children = await driver.$$(childXPath);
-    const childTexts = await Promise.all(children.map((c) => c.getText()));
+    // Sequential: WDIO's ElementArray.map returns a promise, not an array.
+    const childTexts: string[] = [];
+    for (const c of children) {childTexts.push(await c.getText());}
     record('Expanded folder shows its children', children.length > 0 ? 'PASS' : 'FAIL',
         `${children.length} child TreeNode(s): ${JSON.stringify(childTexts)}`);
     if (children.length === 0) {return;}
@@ -213,7 +215,11 @@ describe('sap-bridge attached window', () => {
         } else {
             record('Tree nodes are nested', /<TreeNode\b[^>]*[^/]>\s*<TreeNode\b/.test(after) ? 'PASS' : 'FAIL',
                 'expected at least one TreeNode inside another (children of an expanded folder)');
-            await checkTreeExpand(driver, TREE);
+            try {
+                await checkTreeExpand(driver, TREE);
+            } catch (err) {
+                record('Tree expand checks', 'FAIL', `threw: ${errMsg(err)}`);
+            }
         }
 
         expect(checks.filter((c) => c.status === 'FAIL')).toEqual([]);
