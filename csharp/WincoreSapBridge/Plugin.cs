@@ -162,21 +162,15 @@ internal sealed class SapTreeProvider : ITreeProvider
     // which both of these read straight through.
     public string GetToggleState(string elementId) => IsSelected(elementId) ? "On" : "Off";
 
-    public bool IsSelected(string elementId) =>
-        RequireClient().GetProperty(elementId, "Selected") is bool b && b;
+    public bool IsSelected(string elementId) => RequireClient().IsSelected(elementId);
 
-    public bool IsAlive(string elementId)
-    {
-        if (_client == null) return false;
-        try { RequireClient().Resolve(elementId); return true; }
-        catch { return false; }
-    }
+    public bool IsAlive(string elementId) => _client?.Exists(elementId) ?? false;
 
     public void Invoke(string elementId) => RequireClient().Invoke(elementId);
     public void SetValue(string elementId, string value) => RequireClient().SetValue(elementId, value);
     public void Select(string elementId) => RequireClient().Select(elementId);
     public void RequestFocus(string elementId) => RequireClient().SetFocus(elementId);
-    public void Expand(string elementId) { /* GuiTree nodes expand via Invoke on the TreeNode's key — not modelled as a UIA ExpandCollapse pattern. */ }
+    public void Expand(string elementId) => RequireClient().Expand(elementId);
 
     public void BuildPageSourceXml(string rootElementId, XmlDocument doc, XmlElement? parent)
     {

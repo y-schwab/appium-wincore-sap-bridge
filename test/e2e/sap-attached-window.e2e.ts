@@ -11,9 +11,10 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  * test does not open or log into anything itself.
  *
  * Flow: switch to the SAP window by title → attach → page source (should now be the
- * SAP tree). Output in test-output/attached-window/: SUMMARY.md, 01-attach-result.json
- * (includes per-connection diagnostics when attach fails) and
- * 02-page-source-after-attach.xml.
+ * SAP tree) → if the screen has a tree (SAP Easy Access does): expand a collapsed
+ * folder and select one of its children. Output in test-output/attached-window/:
+ * SUMMARY.md, 01-attach-result.json (includes per-connection diagnostics when attach
+ * fails), 02-page-source-after-attach.xml and 03-page-source-after-expand.xml.
  *
  * Env:
  *   SAP_WINDOW_TITLE  partial title of the logged-in window, matched via
@@ -90,6 +91,55 @@ interface AttachResult {
     [key: string]: unknown;
 }
 
+/**
+ * Finds a collapsed folder by XPath, expands it with `windows: expand` and checks its
+ * children show up in page source; then selects the first child. Leaves the folder
+ * expanded (the driver has no provider-routed collapse) — the next run picks another.
+ */
+async function checkTreeExpand(driver: Browser, tree: string): Promise<void> {
+    const folder = await driver.$(`${tree}//TreeNode[@IsFolder='True' and @IsExpanded='False']`);
+    if (!(await folder.isExisting())) {
+        record('Find collapsed folder by XPath', 'INFO', 'no collapsed folder left in the tree — expand check skipped');
+        return;
+    }
+    const folderId = await folder.elementId;
+    const key = await folder.getAttribute('Key');
+    const text = await folder.getText();
+    record('Find collapsed folder by XPath', 'PASS', `"${text}" key=${key} id=${folderId}`);
+
+    const childXPath = `${tree}//TreeNode[@Key='${key}']/TreeNode`;
+    const before = (await driver.$$(childXPath)).length;
+    record('Collapsed folder shows no children', before === 0 ? 'PASS' : 'FAIL', `${before} child TreeNode(s)`);
+
+    try {
+        await driver.executeScript('windows: expand', [{ elementId: folderId }]);
+    } catch (err) {
+        record('windows: expand on folder', 'FAIL', errMsg(err));
+        return;
+    }
+    const state = await folder.getAttribute('ExpandCollapseState');
+    record('windows: expand on folder', state === 'Expanded' ? 'PASS' : 'FAIL', `ExpandCollapseState=${state}`);
+
+    const expanded = await driver.getPageSource();
+    save('03-page-source-after-expand.xml', expanded);
+    const children = await driver.$$(childXPath);
+    const childTexts = await Promise.all(children.map((c) => c.getText()));
+    record('Expanded folder shows its children', children.length > 0 ? 'PASS' : 'FAIL',
+        `${children.length} child TreeNode(s): ${JSON.stringify(childTexts)}`);
+    if (children.length === 0) {return;}
+
+    // Select only — windows: invoke would double-click and start the transaction.
+    const child = children[0];
+    try {
+        await driver.executeScript('windows: select', [{ elementId: await child.elementId }]);
+        const selected = await child.getAttribute('IsSelected');
+        record('windows: select on child node', String(selected).toLowerCase() === 'true' ? 'PASS' : 'FAIL',
+            `"${childTexts[0]}" IsSelected=${selected}`);
+    } catch (err) {
+        record('windows: select on child node', 'FAIL', errMsg(err));
+    }
+}
+
 describe('sap-bridge attached window', () => {
     let driver: Browser;
 
@@ -155,6 +205,16 @@ describe('sap-bridge attached window', () => {
         const afterGui = guiTagSummary(after);
         record('Page source after attach is SAP tree', afterGui.total > 0 ? 'PASS' : 'FAIL',
             `${after.length} chars, root <${rootTag(after)}>, Gui* tags: ${afterGui.total} ${JSON.stringify(afterGui.tags)}`);
+
+        // 4. Tree nodes: nested under their parents, collapsed folders hide their children.
+        const TREE = "//GuiShell[@SubType='Tree']";
+        if (!after.includes('SubType="Tree"')) {
+            record('Tree nodes', 'INFO', 'no SubType="Tree" shell on this screen — tree checks skipped');
+        } else {
+            record('Tree nodes are nested', /<TreeNode\b[^>]*[^/]>\s*<TreeNode\b/.test(after) ? 'PASS' : 'FAIL',
+                'expected at least one TreeNode inside another (children of an expanded folder)');
+            await checkTreeExpand(driver, TREE);
+        }
 
         expect(checks.filter((c) => c.status === 'FAIL')).toEqual([]);
     }, 90_000);

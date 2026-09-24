@@ -78,6 +78,24 @@ HTML viewers, …) all report `Type` `GuiShell`; their kind is in a `SubType` at
 (`SubType` `Tree`) are virtualised (not real children) and are emitted as synthetic
 `GridRow` / `GridCell` / `TreeNode` elements in page source and XPath.
 
+Tree nodes are nested under their parent node and carry `Key`, `Text`, `IsFolder` and
+(folders only) `IsExpanded`. Like a closed dropdown in UIA, a collapsed folder's children
+are not listed until it is expanded. XPath returns nodes as real elements (id
+`sap:<tree shell id>#node:<key>`), so a test can act on them:
+
+```js
+const folder = await driver.$("//TreeNode[@Text='Tools for Administrators and Developers']");
+await driver.executeScript('windows: expand', [{ elementId: folder.elementId }]);
+const editor = await driver.$("//TreeNode[@Text='ABAP Editor']");
+await driver.executeScript('windows: select', [{ elementId: editor.elementId }]); // select only
+await driver.executeScript('windows: invoke', [{ elementId: editor.elementId }]); // double-click: starts SE38
+```
+
+`getText`, `getAttribute` (`Key`, `IsFolder`, `IsExpanded`, `ExpandCollapseState`,
+`IsSelected`) work on nodes too. A plain `click()` does not: the scripting API gives no
+screen position for a node, so use `windows: select` / `windows: invoke` instead.
+`windows: collapse` is not routed to bridges by the driver yet.
+
 ## Testing
 
 The e2e suite is currently scaled down to `sap-discovery.e2e.ts`: it launches SAP Logon

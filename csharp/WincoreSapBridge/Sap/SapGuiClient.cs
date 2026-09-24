@@ -39,6 +39,7 @@ internal sealed class SapGuiClient : IDisposable
     private const string Moniker = "SAPGUI";
     private const int MaxDepth = 200;
     private const string NodeKeyAttr = "__sapNodeKey";
+    private const string NodeMarker = "#node:";
 
     private Disp? _engine;
     private Disp? _session;
@@ -226,6 +227,49 @@ internal sealed class SapGuiClient : IDisposable
         id != null && id.StartsWith(IdPrefix, StringComparison.Ordinal);
 
     /// <summary>
+    /// Tree nodes are not SAP components — they have no scripting id of their own and
+    /// are addressed by key on their tree shell. Their element id is the shell's id plus
+    /// <see cref="NodeMarker"/> and the node key, e.g.
+    /// <c>sap:/app/con[0]/ses[0]/wnd[0]/usr/…/shell#node:0000000050</c>.
+    /// </summary>
+    internal static string NodeId(string shellId, string nodeKey) => IdPrefix + shellId + NodeMarker + nodeKey;
+
+    private static bool TryParseNodeId(string elementId, out string shellId, out string nodeKey)
+    {
+        var raw = RawId(elementId);
+        int at = raw.IndexOf(NodeMarker, StringComparison.Ordinal);
+        shellId = at < 0 ? "" : raw[..at];
+        nodeKey = at < 0 ? "" : raw[(at + NodeMarker.Length)..];
+        return at >= 0;
+    }
+
+    /// <summary>The tree shell a node id points into, plus the node key.</summary>
+    private (Disp Tree, string Key)? ResolveNode(string elementId)
+    {
+        if (!TryParseNodeId(elementId, out var shellId, out var key)) return null;
+        return (Resolve(shellId), key);
+    }
+
+    /// <summary>True if the element (component or tree node) is still on screen.</summary>
+    public bool Exists(string elementId)
+    {
+        try
+        {
+            if (ResolveNode(elementId) is var (tree, key))
+            {
+                var keys = tree.CallObjOrNull("GetAllNodeKeys");
+                int n = keys?.GetInt("Count") ?? 0;
+                for (int i = 0; i < n; i++)
+                    if (keys!.Get("ElementAt", i)?.ToString() == key) return true;
+                return false;
+            }
+            Resolve(elementId);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// Resolves an element id to a live SAP component via <c>session.FindById(id, false)</c>
     /// (<c>false</c> = return null instead of throwing). SAP ids
     /// (e.g. <c>/app/con[0]/ses[0]/wnd[0]/usr/txtRSYST-BNAME</c>) are stable and globally
@@ -233,6 +277,9 @@ internal sealed class SapGuiClient : IDisposable
     /// </summary>
     public Disp Resolve(string elementId)
     {
+        if (TryParseNodeId(elementId, out _, out _))
+            throw new InvalidOperationException(
+                $"'{elementId}' is a SAP tree node, not a component; this command is not supported on it.");
         var raw = RawId(elementId);
         var comp = SessionOrThrow().CallObjOrNull("FindById", raw, false);
         if (comp == null)
@@ -432,11 +479,12 @@ internal sealed class SapGuiClient : IDisposable
         if (depth > MaxDepth) return null;
 
         XmlElement el;
+        string sapId;
         string type;
         string subType = "";
         try
         {
-            var sapId = component.GetString("Id");
+            sapId = component.GetString("Id");
             type = component.GetString("Type");
             el = doc.CreateElement(ValidTag(type));
 
@@ -501,7 +549,7 @@ internal sealed class SapGuiClient : IDisposable
         // Virtualised controls whose rows/nodes are not children.
         // Grids and trees are shells: Type "GuiShell", kind in SubType ("GridView", "Tree").
         try { if (subType == "GridView") AppendGridRows(doc, el, component); } catch { }
-        try { if (subType == "Tree") AppendTreeNodes(doc, el, component); } catch { }
+        try { if (subType == "Tree") AppendTreeNodes(doc, el, component, sapId, nodeToId, nextNodeKey); } catch { }
 
         return el;
     }
@@ -543,32 +591,92 @@ internal sealed class SapGuiClient : IDisposable
     }
 
     /// <summary>
-    /// <c>GuiTree</c> (a <c>GuiShell</c> with <c>SubType</c> "Tree") nodes are addressed by key, not exposed as <c>Children</c>. Emit the
-    /// currently known nodes as <c>TreeNode</c> children.
+    /// <c>GuiTree</c> (a <c>GuiShell</c> with <c>SubType</c> "Tree") nodes are addressed by
+    /// key, not exposed as <c>Children</c>. Emit them as nested <c>TreeNode</c> elements,
+    /// following <c>GetParent</c>. Like a closed dropdown in UIA, the children of a
+    /// collapsed folder are left out even when SAP has them loaded — expand the folder
+    /// (<c>windows: expand</c>) to reveal them.
     /// </summary>
-    private static void AppendTreeNodes(XmlDocument doc, XmlElement parent, Disp component)
+    private static void AppendTreeNodes(
+        XmlDocument doc,
+        XmlElement parent,
+        Disp tree,
+        string shellId,
+        Dictionary<string, string>? nodeToId,
+        Func<string>? nextNodeKey)
     {
-        var keys = component.CallObjOrNull("GetAllNodeKeys");
+        var keys = tree.CallObjOrNull("GetAllNodeKeys");
         if (keys == null) return;
         int n = keys.GetInt("Count");
+
+        var order = new List<string>();
+        var parentOf = new Dictionary<string, string>(StringComparer.Ordinal);
         for (int i = 0; i < n; i++)
         {
             string key;
             try { key = keys.Get("ElementAt", i)?.ToString() ?? ""; }
             catch { continue; }
-            if (key.Length == 0) continue;
-            var nodeEl = doc.CreateElement("TreeNode");
-            nodeEl.SetAttribute("Key", key);
-            nodeEl.SetAttribute("Text", Sanitize(component.GetString("GetNodeTextByKey", key)));
-            nodeEl.SetAttribute("IsExpanded", component.GetBool("IsFolderExpanded", key).ToString());
-            parent.AppendChild(nodeEl);
+            if (key.Length == 0 || parentOf.ContainsKey(key)) continue;
+            order.Add(key);
+            parentOf[key] = tree.GetString("GetParent", key);
         }
+
+        // Keep SAP's node order within each parent. A node whose parent is empty or
+        // unknown is a top-level node (so a failing GetParent degrades to a flat list).
+        var roots = new List<string>();
+        var childrenOf = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var key in order)
+        {
+            var p = parentOf[key];
+            if (p.Length == 0 || !parentOf.ContainsKey(p)) { roots.Add(key); continue; }
+            if (!childrenOf.TryGetValue(p, out var list)) childrenOf[p] = list = new List<string>();
+            list.Add(key);
+        }
+
+        foreach (var key in roots)
+            AppendTreeNode(doc, parent, tree, shellId, key, childrenOf, nodeToId, nextNodeKey, 0);
+    }
+
+    private static void AppendTreeNode(
+        XmlDocument doc,
+        XmlElement parent,
+        Disp tree,
+        string shellId,
+        string key,
+        Dictionary<string, List<string>> childrenOf,
+        Dictionary<string, string>? nodeToId,
+        Func<string>? nextNodeKey,
+        int depth)
+    {
+        if (depth > MaxDepth) return;
+        childrenOf.TryGetValue(key, out var children);
+        bool isFolder = children != null || tree.GetBool("IsFolder", key);
+        bool isExpanded = isFolder && tree.GetBool("IsFolderExpanded", key);
+
+        var nodeEl = doc.CreateElement("TreeNode");
+        if (nodeToId != null && nextNodeKey != null)
+        {
+            var nodeKey = nextNodeKey();
+            nodeEl.SetAttribute(NodeKeyAttr, nodeKey);
+            nodeToId[nodeKey] = NodeId(shellId, key);
+        }
+        nodeEl.SetAttribute("Key", key);
+        nodeEl.SetAttribute("Text", Sanitize(tree.GetString("GetNodeTextByKey", key)));
+        nodeEl.SetAttribute("IsFolder", isFolder.ToString());
+        if (isFolder) nodeEl.SetAttribute("IsExpanded", isExpanded.ToString());
+        parent.AppendChild(nodeEl);
+
+        if (!isExpanded || children == null) return;
+        foreach (var child in children)
+            AppendTreeNode(doc, nodeEl, tree, shellId, child, childrenOf, nodeToId, nextNodeKey, depth + 1);
     }
 
     // ── Property access ────────────────────────────────────────────────────────
 
     public object? GetProperty(string elementId, string property)
     {
+        if (ResolveNode(elementId) is var (tree, key))
+            return GetNodeProperty(tree, key, elementId, property);
         var comp = Resolve(elementId);
         return property.ToLowerInvariant() switch
         {
@@ -587,12 +695,63 @@ internal sealed class SapGuiClient : IDisposable
         };
     }
 
-    public string GetText(string elementId) => Resolve(elementId).GetString("Text");
+    private static object? GetNodeProperty(Disp tree, string key, string elementId, string property)
+    {
+        bool IsFolder() => tree.GetBool("IsFolder", key) || tree.GetInt("GetNodeChildrenCount", key) > 0;
+        return property.ToLowerInvariant() switch
+        {
+            "id" => RawId(elementId),
+            "type" or "tagname" or "classname" or "controltype" or "localizedcontroltype" => "TreeNode",
+            "key" => key,
+            "name" or "text" or "value" => tree.GetString("GetNodeTextByKey", key),
+            "isfolder" => IsFolder(),
+            "isexpanded" => tree.GetBool("IsFolderExpanded", key),
+            // What the driver's windows: expand reads back to confirm the expand took.
+            "expandcollapsestate" => !IsFolder() ? "LeafNode"
+                : tree.GetBool("IsFolderExpanded", key) ? "Expanded" : "Collapsed",
+            "selected" or "isselected" => IsNodeSelected(tree, key),
+            "changeable" or "enabled" or "isenabled" => true,
+            // No per-node screen geometry in the scripting API — ClickablePoint, x, y, …
+            // come back null, so act on nodes with windows: select / invoke / expand.
+            _ => null,
+        };
+    }
 
-    public string GetTagName(string elementId) => Resolve(elementId).GetString("Type");
+    private static bool IsNodeSelected(Disp tree, string key)
+    {
+        // Single-selection trees report SelectedNode; multi-selection ones only the collection.
+        if (tree.GetString("SelectedNode") == key) return true;
+        try
+        {
+            var selected = tree.CallObjOrNull("GetSelectedNodes");
+            int n = selected?.GetInt("Count") ?? 0;
+            for (int i = 0; i < n; i++)
+                if (selected!.Get("ElementAt", i)?.ToString() == key) return true;
+        }
+        catch { }
+        return false;
+    }
+
+    public bool IsSelected(string elementId) =>
+        ResolveNode(elementId) is var (tree, key)
+            ? IsNodeSelected(tree, key)
+            : GetProperty(elementId, "Selected") is bool b && b;
+
+    public string GetText(string elementId) =>
+        ResolveNode(elementId) is var (tree, key)
+            ? tree.GetString("GetNodeTextByKey", key)
+            : Resolve(elementId).GetString("Text");
+
+    public string GetTagName(string elementId) =>
+        ResolveNode(elementId) is not null ? "TreeNode" : Resolve(elementId).GetString("Type");
 
     public object GetRect(string elementId)
     {
+        if (ResolveNode(elementId) is not null)
+            throw new NotSupportedException(
+                "SAP tree nodes have no screen geometry in the scripting API, so they cannot be clicked with " +
+                "the mouse. Use windows: select (select the node), windows: invoke (double-click: opens the " +
+                "node / starts its transaction) or windows: expand instead.");
         var comp = Resolve(elementId);
         return new
         {
@@ -627,6 +786,13 @@ internal sealed class SapGuiClient : IDisposable
 
     public void Invoke(string elementId)
     {
+        // A double-click is what "activating" a node means in SAP: it toggles a folder
+        // and starts the transaction behind a leaf (e.g. SAP Easy Access).
+        if (ResolveNode(elementId) is var (tree, key))
+        {
+            tree.Call("DoubleClickNode", key);
+            return;
+        }
         var comp = Resolve(elementId);
         switch (comp.GetString("Type"))
         {
@@ -648,9 +814,23 @@ internal sealed class SapGuiClient : IDisposable
         }
     }
 
-    public void SetFocus(string elementId) => Resolve(elementId).Call("SetFocus");
+    public void SetFocus(string elementId)
+    {
+        if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
+        else Resolve(elementId).Call("SetFocus");
+    }
 
-    public void Select(string elementId) => Resolve(elementId).Call("Select");
+    public void Select(string elementId)
+    {
+        if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
+        else Resolve(elementId).Call("Select");
+    }
+
+    /// <summary>Expands a tree folder node. No-op for anything else.</summary>
+    public void Expand(string elementId)
+    {
+        if (ResolveNode(elementId) is var (tree, key)) tree.Call("ExpandNode", key);
+    }
 
     /// <summary>Sends a virtual key to a window, e.g. 0 = Enter, 8 = F8.</summary>
     public void SendVKey(int vkey, string? windowElementId = null)
