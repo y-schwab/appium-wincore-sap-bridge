@@ -1,18 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
-import { SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
+import { ENTER_BUTTON, SapDemo, errMsg, refId, shortId } from './helpers/sap-demo.js';
 
 /**
- * Demo: ALV grid. SE16N doesn't exist on this system, and SE16 shows a classic list for
- * this user — its output format is a per-user setting in SE16's "User Parameters"
- * popup (list vs. ALV grid). So this test switches it to ALV grid through that popup
- * (exercising popups, wnd[1], on the way), reads T000 from the grid, and switches it
- * back at the end. Built step by step: each step captures the screen it lands on, the
- * next one is written from what SAP actually showed.
+ * Demo: ALV grid, and a popup on the way. SE16N doesn't exist on this system, and SE16
+ * shows a classic list for this user — its output format is a per-user setting in
+ * SE16's "User Parameters" popup. So this test switches it to ALV grid through that
+ * popup, shows T000 in the grid, and switches it back at the end. Built step by step:
+ * each step captures what it lands on, the next one is written from what SAP showed.
  *
- *   Step 1 (this version): /nSE16 → User Parameters (F6) → capture the popup →
- *   close it with its Cancel button, changing nothing.
- *   Next: pick "ALV Grid display" in the popup, T000 → Execute → grid; restore.
+ *   Step 1 ✅ /nSE16 → User Parameters (F6) → popup "User-Specific Settings" (wnd[1],
+ *             its own window, served by the same attach). Data Browser tab: radio
+ *             buttons "ALV Grid Display" / "ALV List" / "Standard SE16 list";
+ *             buttons "Transfer (Enter)" / "Cancel (F12)".
+ *   Step 2    pick "ALV Grid Display", Transfer; T000 → Execute → wait for the grid
+ *             (GuiShell SubType GridView) and capture it; restore "Standard SE16 list".
+ *   Next: read client 001 out of the grid by column.
  *
  * Ends with /n back to SAP Easy Access.
  *
@@ -22,8 +25,46 @@ import { SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
  * screen, plus the page source of the screen a step failed on (failed-<step>.xml).
  */
 const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... (F6)", SE16 initial screen
+const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // SE16 initial screen
+const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)", selection screen
+const TRANSFER_BUTTON = "//GuiButton[starts-with(@Tooltip,'Transfer')]"; // in the popup
+const GRID = "//GuiShell[@SubType='GridView']";
+const TABLE = 'T000';
+
+const ALV_GRID = 'ALV Grid Display';
+const STANDARD_LIST = 'Standard SE16 list';
 
 const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16 ALV grid');
+
+/**
+ * Sets SE16's output format the way a user does: SE16 → User Parameters → pick the
+ * radio button by its visible text → Transfer. Returns to the main window.
+ */
+async function setOutputFormat(format: string): Promise<boolean> {
+    const driver = demo.driver;
+    const popup = await demo.runTransaction('/nSE16', 'Open SE16', 'Data Browser')
+        && await demo.openPopup(USER_PARAMETERS_BUTTON, 'User Parameters → popup');
+    if (!popup) {return false;}
+    try {
+        const radio = await driver.$(`//GuiRadioButton[@Text='${format}']`);
+        await radio.click();
+        if (!(await radio.isSelected())) {
+            return demo.fail(`Pick "${format}"`, 'radio button not selected after click()');
+        }
+        demo.record(`Pick "${format}"`, 'PASS', shortId(await radio.elementId));
+
+        await (await driver.$(TRANSFER_BUTTON)).click();
+        const closed = await driver.waitUntil(
+            async () => !(await driver.getWindowHandles()).includes(popup),
+            { timeout: 10_000 }).then(() => true, () => false);
+        await driver.switchToWindow(demo.mainWindow);
+        if (!closed) {return demo.fail('Transfer', 'popup still open');}
+        demo.record('Transfer', 'PASS', `popup closed; status bar "${await demo.textOf('~wnd[0]/sbar')}"`);
+        return true;
+    } catch (err) {
+        return demo.fail(`Set output "${format}"`, errMsg(err));
+    }
+}
 
 describe('sap demo: SE16 ALV grid', () => {
     beforeAll(async () => {
@@ -44,30 +85,46 @@ describe('sap demo: SE16 ALV grid', () => {
         }
 
         try {
-            const popup = await demo.runTransaction('/nSE16', 'Open SE16', 'Data Browser')
-                && await demo.openPopup(USER_PARAMETERS_BUTTON, 'User Parameters → popup');
-            if (popup) {
-                await demo.captureScreen('User Parameters popup', '01-page-source-user-parameters.xml');
+            // 1. Switch SE16 to ALV grid output (lands back on SE16's initial screen).
+            if (await setOutputFormat(ALV_GRID)) {
+                // 2. T000 → selection screen → Execute → grid.
+                const executed = await demo.typeInto(TABLE_NAME_FIELD, 'Table Name', TABLE)
+                    && await demo.pressAndWait(ENTER_BUTTON, `Table ${TABLE} → selection screen`, 'Selection Screen');
+                if (executed) {
+                    await (await driver.$(EXECUTE_BUTTON)).click();
+                    const grid = await driver.$(GRID);
+                    const found = await grid.waitForExist({ timeout: 15_000 }).then(() => true, () => false);
+                    if (found) {
+                        demo.record('Grid after Execute', 'PASS',
+                            `${shortId(await grid.elementId)}, title "${await demo.textOf('~wnd[0]/titl')}"`);
+                    } else {
+                        await demo.fail('Grid after Execute', `no ${GRID} within 15s`);
+                    }
+                    await demo.captureScreen('Result', '01-page-source-grid.xml');
 
-                // Close without changing anything — the popup's own Cancel button, found by tooltip.
-                const cancel = await driver.$("//GuiButton[starts-with(@Tooltip,'Cancel')]");
-                if (await cancel.isExisting()) {
-                    const id = shortId(await cancel.elementId);
-                    await cancel.click();
-                    const closed = await driver.waitUntil(
-                        async () => !(await driver.getWindowHandles()).includes(popup),
-                        { timeout: 10_000 }).then(() => true, () => false);
-                    demo.record('Cancel popup', closed ? 'PASS' : 'FAIL', `${id}; popup ${closed ? 'closed' : 'still open'}`);
-                } else {
-                    demo.record('Cancel popup', 'FAIL', 'no button with tooltip "Cancel…" in the popup — see buttons above');
+                    // What the synthetic grid elements look like to a find — ids decide
+                    // whether cells can be acted on yet.
+                    for (const xpath of [`${GRID}//GridRow`, `${GRID}//GridCell[@Column='MANDT']`]) {
+                        try {
+                            const refs = await driver.findElements('xpath', xpath);
+                            demo.record(`Find ${xpath}`, 'INFO',
+                                `${refs.length} found${refs.length ? `; first ids ${JSON.stringify(refs.slice(0, 2).map(refId))}` : ''}`);
+                        } catch (err) {
+                            demo.record(`Find ${xpath}`, 'INFO', `threw: ${errMsg(err)}`);
+                        }
+                    }
                 }
             }
         } catch (err) {
-            await demo.fail('SE16 user parameters', errMsg(err));
+            await demo.fail('ALV flow', errMsg(err));
+        } finally {
+            // 3. Always put the setting back — the SE16 demo expects the classic list.
+            await demo.closePopups();
+            await setOutputFormat(STANDARD_LIST);
         }
 
         await demo.backHome();
 
         expect(demo.failed).toEqual([]);
-    }, 120_000);
+    }, 180_000);
 });
