@@ -13,6 +13,7 @@ export const OKCODE = '~wnd[0]/tbar[0]/okcd'; // command field
 export const ENTER_BUTTON = '~wnd[0]/tbar[0]/btn[0]'; // green check mark = Enter
 export const TITLE_BAR = '~wnd[0]/titl';
 export const STATUS_BAR = '~wnd[0]/sbar';
+const START_BUTTON = '~wnd[0]/usr/btnSTARTBUTTON'; // "Start SAP Easy Access", on the "SAP" start screen
 
 export const WINDOW_TITLE = process.env.SAP_WINDOW_TITLE ?? 'SAP Easy';
 
@@ -174,10 +175,37 @@ export class SapDemo {
             && this.pressAndWait(ENTER_BUTTON, step, expectTitle);
     }
 
-    /** /n back to SAP Easy Access, so the next test (or rerun) starts from there. */
-    async backHome(): Promise<boolean> {
+    /**
+     * /n back to SAP Easy Access, so the next test (or rerun) starts from there. /n can
+     * land on SAP's start screen instead (title "SAP", a single "Start SAP Easy Access"
+     * button) — press that, like a user would.
+     */
+    async backHome(timeoutMs = 20_000): Promise<boolean> {
+        const step = 'Back to SAP Easy Access';
         if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
-        return this.runTransaction('/n', 'Back to SAP Easy Access', 'SAP Easy Access');
+        if (!(await this.typeInto(OKCODE, 'command field', '/n'))) {return false;}
+        try {
+            await (await this.driver.$(ENTER_BUTTON)).click();
+        } catch (err) {
+            return this.fail(step, `click ${ENTER_BUTTON}: ${errMsg(err)}`);
+        }
+        let viaStart = false;
+        let now = '';
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            now = await this.textOf(TITLE_BAR);
+            if (now.includes('SAP Easy Access')) {
+                this.record(step, 'PASS', `→ "${now.replace(/\s{2,}/g, ' ')}"${viaStart ? ' (via start screen)' : ''}`);
+                return true;
+            }
+            const start = await this.driver.$(START_BUTTON);
+            if (!viaStart && await start.isExisting()) {
+                await start.click();
+                viaStart = true;
+            }
+            await delay(500);
+        }
+        return this.fail(step, `screen stayed "${now}"; status bar "${await this.textOf(STATUS_BAR)}"`);
     }
 
     /**
