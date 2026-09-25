@@ -37,6 +37,7 @@ import { ENTER_BUTTON, SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
 const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... (F6)", SE16 initial screen
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // SE16 initial screen
 const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)", selection screen
+const POPUP_TITLE = 'User-Specific Settings'; // the User Parameters popup's window title
 const TRANSFER_BUTTON = "//GuiButton[starts-with(@Tooltip,'Transfer')]"; // in the popup
 const GRID = "//GuiShell[@SubType='GridView']";
 const TABLE = 'T000';
@@ -57,7 +58,7 @@ const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16 ALV grid');
 async function setUserParameters(choices: string[]): Promise<boolean> {
     const driver = demo.driver;
     const popup = await demo.runTransaction('/nSE16', 'Open SE16', 'Data Browser')
-        && await demo.openPopup(USER_PARAMETERS_BUTTON, 'User Parameters → popup');
+        && await demo.openPopup(USER_PARAMETERS_BUTTON, 'User Parameters → popup', POPUP_TITLE);
     if (!popup) {return false;}
     try {
         for (const choice of choices) {

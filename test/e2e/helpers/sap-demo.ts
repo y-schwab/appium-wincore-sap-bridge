@@ -246,11 +246,12 @@ export class SapDemo {
     }
 
     /**
-     * Clicks a button that opens a popup (wnd[1] — its own window) and switches to it.
-     * Returns the popup's handle, or undefined (recorded as FAIL) if none appeared.
+     * Clicks a button that opens a popup (wnd[1] — its own window) and switches straight
+     * to it by its title (windows: switchToWindowByTitle), retrying until it appears — no
+     * trying other windows on the way. Returns the popup's handle, or undefined (recorded
+     * as FAIL) if it didn't appear.
      */
-    async openPopup(selector: string, step: string, timeoutMs = 10_000): Promise<string | undefined> {
-        const before = new Set(await this.driver.getWindowHandles());
+    async openPopup(selector: string, step: string, title: string, timeoutMs = 10_000): Promise<string | undefined> {
         try {
             await this.pause();
             await (await this.driver.$(selector)).click();
@@ -258,24 +259,37 @@ export class SapDemo {
             await this.fail(step, `click ${selector}: ${errMsg(err)}`);
             return undefined;
         }
-        // SAP GUI opens helper windows too (e.g. an "Animated Gif" busy indicator), so
-        // only a new window whose page source is a SAP popup (GuiModalWindow) counts.
-        const skipped = new Map<string, string>();
+        let lastError = '';
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
-            for (const h of (await this.driver.getWindowHandles()).filter((x) => !before.has(x) && !skipped.has(x))) {
-                if (await this.isSapPopup(h)) {
-                    const others = skipped.size ? `; skipped ${JSON.stringify(Object.fromEntries(skipped))}` : '';
-                    this.record(step, 'PASS', `popup ${h} "${await this.driver.getTitle()}"${others}`);
-                    return h;
+            try {
+                await this.driver.executeScript('windows: switchToWindowByTitle', [{ title }]);
+                // Same title could in theory be another app's window — make sure it's SAP's popup.
+                if ((await this.driver.getPageSource()).startsWith('<GuiModalWindow')) {
+                    const handle = await this.driver.getWindowHandle();
+                    this.record(step, 'PASS', `popup ${handle} "${await this.driver.getTitle()}"`);
+                    return handle;
                 }
-                skipped.set(h, await this.driver.getTitle().catch(() => '?'));
+                lastError = `"${title}" is not a SAP popup`;
+            } catch (err) {
+                lastError = errMsg(err);
             }
             await delay(500);
         }
         if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
-        await this.fail(step, `no SAP popup within ${timeoutMs / 1000}s; other new windows ${JSON.stringify(Object.fromEntries(skipped))}`);
+        await this.fail(step, `no popup "${title}" within ${timeoutMs / 1000}s: ${lastError}`);
         return undefined;
+    }
+
+    /** True while a SAP popup is open: SAP then locks the main window (Changeable=False). */
+    private async popupOpen(): Promise<boolean> {
+        try {
+            const main = await this.driver.$('/GuiMainWindow');
+            return (await main.isExisting())
+                && String(await main.getAttribute('Changeable')).toLowerCase() === 'false';
+        } catch {
+            return false;
+        }
     }
 
     /** Switches to `handle` and tells whether it is a SAP popup (wnd[1], wnd[2], …). */
@@ -293,6 +307,10 @@ export class SapDemo {
      * locks the main window (its toolbar buttons disappear). Ends on the main window.
      */
     async closePopups(): Promise<void> {
+        // Ask the main window first; only search the windows when a popup is really open
+        // (the search switches through them, which shows on screen).
+        if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
+        if (!(await this.popupOpen())) {return;}
         for (const h of await this.driver.getWindowHandles()) {
             if (h === this.mainWindow || !(await this.isSapPopup(h))) {continue;}
             const title = await this.driver.getTitle().catch(() => '?');
