@@ -14,8 +14,12 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  *
  *   Step 1 ✅ open SE16 from the command field — same window, one input field
  *             (wnd[0]/usr/ctxtDATABROWSE-TABLENAME), Enter = "Table Contents".
- *   Step 2    enter T000, press Enter → selection screen; press Execute if the
- *             application toolbar has one → result screen.
+ *   Step 2 ✅ enter T000, Enter → selection screen; Execute (tbar[1]/btn[8]) →
+ *             result. SE16 shows a classic list here, not an ALV grid: every value
+ *             is a GuiLabel whose Id is its position, lbl[column,row]; column
+ *             headers (MANDT, MTEXT, …) on one row, one row per entry below.
+ *   Step 3    read the list like a person would: find the header row, find the
+ *             row whose MANDT is 001, read that row into a record and check it.
  *
  * Ends with /n back to SAP Easy Access, so the test can be rerun as is.
  *
@@ -37,6 +41,10 @@ const TITLE_BAR = '~wnd[0]/titl';
 const STATUS_BAR = '~wnd[0]/sbar';
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // seen on SE16 in step 1
 const TABLE = 'T000'; // SAP clients
+const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)" on the selection screen, seen in step 2
+const CLIENT = '001';
+// What step 2's page source showed for client 001.
+const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAER: 'EUR' };
 
 /** `sap:/app/con[0]/ses[0]/wnd[0]/…` → `wnd[0]/…`, for readable reports and ~ locators. */
 function shortId(id: string): string {
@@ -140,6 +148,48 @@ function describeShells(xml: string): string {
     const rows = (xml.match(/<GridRow\b/g) ?? []).length;
     const cells = (xml.match(/<GridCell\b/g) ?? []).length;
     return `${shells.length ? shells.join('\n') : '(no GuiShell)'}\nGridRow: ${rows}, GridCell: ${cells}`;
+}
+
+/** `…/usr/lbl[9,6]` → { col: 9, row: 6 }. */
+function listPos(id: string): { col: number; row: number } | undefined {
+    const m = id.match(/\/usr\/(?:lbl|chk|txt)\[(\d+),(\d+)\]$/);
+    return m ? { col: Number(m[1]), row: Number(m[2]) } : undefined;
+}
+
+/**
+ * Reads one entry of a classic SAP list (SE16 without ALV) by locators only:
+ * header row = the row of the label reading `keyColumn`; entry row = the row whose
+ * label in that column reads `keyValue`; then each header's column in the entry row.
+ */
+async function readListEntry(driver: Browser, keyColumn: string, keyValue: string): Promise<Record<string, string>> {
+    const header = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyColumn}']`);
+    if (!(await header.isExisting())) {throw new Error(`no column header "${keyColumn}"`);}
+    const headerPos = listPos(await header.elementId);
+    if (!headerPos) {throw new Error(`unexpected header id ${await header.elementId}`);}
+    record(`Find column header ${keyColumn}`, 'PASS', `column ${headerPos.col}, row ${headerPos.row}`);
+
+    // Every non-empty label on the header row is a column name.
+    const columns: { name: string; col: number }[] = [];
+    for (const e of await driver.findElements('xpath', `//GuiUserArea/GuiLabel[contains(@Id, ',${headerPos.row}]') and @Text!='']`)) {
+        const pos = listPos(Object.values(e)[0] as string);
+        if (pos?.row === headerPos.row) {columns.push({ name: await (await driver.$(e)).getText(), col: pos.col });}
+    }
+    record('Read column headers', columns.length > 0 ? 'PASS' : 'FAIL', columns.map((c) => `${c.name}@${c.col}`).join(', '));
+
+    const entryRows = await driver.findElements('xpath', "//GuiUserArea/GuiCheckBox[contains(@Id, '/usr/chk[')]");
+    record('Count entries (one checkbox per row)', 'INFO', `${entryRows.length} row(s)`);
+
+    const cell = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyValue}' and contains(@Id, 'lbl[${headerPos.col},')]`);
+    if (!(await cell.isExisting())) {throw new Error(`no row with ${keyColumn} = ${keyValue}`);}
+    const row = listPos(await cell.elementId)!.row;
+    record(`Find row ${keyColumn} = ${keyValue}`, 'PASS', `row ${row}`);
+
+    const entry: Record<string, string> = {};
+    for (const c of columns) {
+        const el = await driver.$(`~wnd[0]/usr/lbl[${c.col},${row}]`);
+        entry[c.name] = (await el.isExisting()) ? (await el.getText()).trim() : '';
+    }
+    return entry;
 }
 
 /** Page source plus what a person would look at on this screen, under one label. */
@@ -273,21 +323,26 @@ describe('sap demo: SE16 → T000', () => {
             && await pressAndWait(driver, ENTER_BUTTON, `Table Name ${TABLE}`);
         if (onSelection) {await captureScreen(driver, 'selection screen', '03-page-source-selection.xml');}
 
-        // 4. Execute (found by tooltip on the application toolbar) → the table contents.
-        if (onSelection) {
-            const execute = await driver.$("//GuiToolbar[@Name='tbar[1]']//GuiButton[starts-with(@Tooltip,'Execute')]");
-            if (!(await execute.isExisting())) {
-                record('Find Execute button', 'INFO', 'no tbar[1] button with tooltip "Execute…" — see toolbar buttons above');
-            } else {
-                const selector = `~${shortId(await execute.elementId)}`;
-                record('Find Execute button', 'PASS', selector);
-                if (await pressAndWait(driver, selector, 'Execute')) {
-                    await captureScreen(driver, 'result', '04-page-source-result.xml');
-                }
+        // 4. Execute (F8) → the table contents.
+        const onResult = onSelection && await pressAndWait(driver, EXECUTE_BUTTON, 'Execute');
+        if (onResult) {await captureScreen(driver, 'result', '04-page-source-result.xml');}
+
+        // 5. Read client 001 out of the list and check it.
+        if (onResult) {
+            try {
+                const entry = await readListEntry(driver, 'MANDT', CLIENT);
+                record(`Client ${CLIENT} as read from the list`, 'INFO', JSON.stringify(entry));
+                const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => entry[k] !== v);
+                record(`Client ${CLIENT} matches expected`, wrong.length === 0 ? 'PASS' : 'FAIL',
+                    wrong.length === 0
+                        ? JSON.stringify(EXPECTED_CLIENT)
+                        : wrong.map(([k, v]) => `${k}: expected "${v}", read "${entry[k]}"`).join('; '));
+            } catch (err) {
+                record(`Read client ${CLIENT}`, 'FAIL', errMsg(err));
             }
         }
 
-        // 5. Back home with /n, so the next run starts from SAP Easy Access again.
+        // 6. Back home with /n, so the next run starts from SAP Easy Access again.
         if (await runTransaction(driver, '/n')) {
             record('Back home', 'INFO', await describeScreen(driver));
             save('05-page-source-back-home.xml', await driver.getPageSource());
