@@ -9,14 +9,20 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  * step. Goal: from SAP Easy Access, open the Data Browser (SE16), show table T000 (the
  * SAP clients table) and read client 001 from the result grid.
  *
- * Step 1 (this version): open SE16 from the command field and capture the screen we
- * land on — no guessing about field ids or new windows before we've seen it. Then go
- * back to SAP Easy Access with /n, so the test can be rerun as is.
+ * Each step captures the screen it lands on (page source + summary), so the next step
+ * is written from what SAP actually showed, not guessed.
+ *
+ *   Step 1 ✅ open SE16 from the command field — same window, one input field
+ *             (wnd[0]/usr/ctxtDATABROWSE-TABLENAME), Enter = "Table Contents".
+ *   Step 2    enter T000, press Enter → selection screen; press Execute if the
+ *             application toolbar has one → result screen.
+ *
+ * Ends with /n back to SAP Easy Access, so the test can be rerun as is.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo/: SUMMARY.md, 01-page-source-home.xml,
- * 02-page-source-se16.xml, 03-page-source-back-home.xml.
+ * Output in test-output/sap-demo/: SUMMARY.md and one page source per screen
+ * (01-home, 02-se16, 03-selection, 04-result, 05-back-home).
  *
  * Env:
  *   SAP_WINDOW_TITLE  partial title of the logged-in window (default: "SAP Easy")
@@ -29,6 +35,13 @@ const OKCODE = '~wnd[0]/tbar[0]/okcd'; // command field
 const ENTER_BUTTON = '~wnd[0]/tbar[0]/btn[0]'; // green check mark = Enter
 const TITLE_BAR = '~wnd[0]/titl';
 const STATUS_BAR = '~wnd[0]/sbar';
+const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // seen on SE16 in step 1
+const TABLE = 'T000'; // SAP clients
+
+/** `sap:/app/con[0]/ses[0]/wnd[0]/…` → `wnd[0]/…`, for readable reports and ~ locators. */
+function shortId(id: string): string {
+    return id.replace(/^(sap:)?\/app\/con\[\d+\]\/ses\[\d+\]\//, '');
+}
 
 type Status = 'PASS' | 'FAIL' | 'INFO';
 
@@ -103,9 +116,55 @@ async function listInputFields(driver: Browser): Promise<string> {
     for (const e of els) {
         const id = Object.values(e)[0] as string;
         const el = await driver.$(e);
-        rows.push(`${id.replace(/^sap:\/app\/con\[\d+\]\/ses\[\d+\]\//, '')} = "${await el.getText()}"`);
+        rows.push(`${shortId(id)} = "${await el.getText()}"`);
     }
     return rows.length ? rows.join('\n') : '(none)';
+}
+
+/** Toolbar buttons with their tooltips — how the next step finds Execute & co. */
+async function listButtons(driver: Browser): Promise<string> {
+    const els = await driver.findElements('xpath', '//GuiToolbar//GuiButton');
+    const rows: string[] = [];
+    for (const e of els) {
+        const id = Object.values(e)[0] as string;
+        const el = await driver.$(e);
+        rows.push(`${shortId(id)} "${await el.getAttribute('Tooltip')}"`);
+    }
+    return rows.length ? rows.join('\n') : '(none)';
+}
+
+/** Shell controls (grid, tree, toolbar, …) and synthetic grid rows/cells in a page source. */
+function describeShells(xml: string): string {
+    const shells = [...xml.matchAll(/<GuiShell\b[^>]*\bId="([^"]*)"[^>]*\bSubType="([^"]*)"/g)]
+        .map((m) => `${m[2]} ${shortId(m[1])}`);
+    const rows = (xml.match(/<GridRow\b/g) ?? []).length;
+    const cells = (xml.match(/<GridCell\b/g) ?? []).length;
+    return `${shells.length ? shells.join('\n') : '(no GuiShell)'}\nGridRow: ${rows}, GridCell: ${cells}`;
+}
+
+/** Page source plus what a person would look at on this screen, under one label. */
+async function captureScreen(driver: Browser, label: string, file: string): Promise<void> {
+    record(`${label} screen`, 'INFO', await describeScreen(driver));
+    let xml = '';
+    try {
+        xml = await driver.getPageSource();
+        save(file, xml);
+        record(`Page source on ${label}`, 'PASS', `saved ${file} (${xml.length} chars)`);
+    } catch (err) {
+        record(`Page source on ${label}`, 'FAIL', errMsg(err));
+    }
+    const parts: [string, () => Promise<string>][] = [
+        ['Input fields', () => listInputFields(driver)],
+        ['Toolbar buttons', () => listButtons(driver)],
+        ['Shells', async () => describeShells(xml)],
+    ];
+    for (const [what, fn] of parts) {
+        try {
+            record(`${what} on ${label}`, 'INFO', await fn());
+        } catch (err) {
+            record(`${what} on ${label}`, 'FAIL', errMsg(err));
+        }
+    }
 }
 
 /** Waits until the title bar text differs from `before` — i.e. SAP has moved to another screen. */
@@ -126,34 +185,45 @@ async function waitForScreenChange(driver: Browser, before: string, timeoutMs = 
  * scripting Press() through `windows: invoke` as fallback.
  */
 async function runTransaction(driver: Browser, tcode: string): Promise<boolean> {
-    const titleBefore = await textOf(driver, TITLE_BAR);
+    if (!(await typeInto(driver, OKCODE, 'command field', tcode))) {return false;}
+    return pressAndWait(driver, ENTER_BUTTON, `"${tcode}"`);
+}
+
+async function typeInto(driver: Browser, selector: string, label: string, value: string): Promise<boolean> {
     try {
-        const okcd = await driver.$(OKCODE);
-        await okcd.setValue(tcode);
-        record(`Type "${tcode}" in command field`, 'PASS', `read back "${await okcd.getText()}"`);
+        const field = await driver.$(selector);
+        await field.setValue(value);
+        record(`Type "${value}" in ${label}`, 'PASS', `read back "${await field.getText()}"`);
+        return true;
     } catch (err) {
-        record(`Type "${tcode}" in command field`, 'FAIL', errMsg(err));
+        record(`Type "${value}" in ${label}`, 'FAIL', errMsg(err));
         return false;
     }
+}
 
-    const enter = await driver.$(ENTER_BUTTON);
+/** Clicks a toolbar button and waits for SAP to move to another screen. */
+async function pressAndWait(driver: Browser, selector: string, after: string): Promise<boolean> {
+    const titleBefore = await textOf(driver, TITLE_BAR);
+    const button = await driver.$(selector);
+    const tooltip = await button.getAttribute('Tooltip').catch(() => '?');
     try {
-        await enter.click();
-        record('Press Enter button (click)', 'PASS', `tooltip "${await enter.getAttribute('Tooltip').catch(() => '?')}"`);
+        await button.click();
+        record(`Click "${tooltip}"`, 'PASS', selector);
     } catch (err) {
-        record('Press Enter button (click)', 'INFO', `click() failed, trying windows: invoke — ${errMsg(err)}`);
+        record(`Click "${tooltip}"`, 'INFO', `click() failed, trying windows: invoke — ${errMsg(err)}`);
         try {
-            await driver.executeScript('windows: invoke', [{ elementId: await enter.elementId }]);
-            record('Press Enter button (windows: invoke)', 'PASS', 'Press() via scripting');
+            await driver.executeScript('windows: invoke', [{ elementId: await button.elementId }]);
+            record(`Press "${tooltip}" (windows: invoke)`, 'PASS', 'Press() via scripting');
         } catch (err2) {
-            record('Press Enter button (windows: invoke)', 'FAIL', errMsg(err2));
+            record(`Press "${tooltip}" (windows: invoke)`, 'FAIL', errMsg(err2));
             return false;
         }
     }
 
     const titleAfter = await waitForScreenChange(driver, titleBefore);
     const moved = titleAfter !== titleBefore;
-    record(`Screen changed after "${tcode}"`, moved ? 'PASS' : 'FAIL', `"${titleBefore}" → "${titleAfter}"`);
+    const status = moved ? '' : `; status bar "${await textOf(driver, STATUS_BAR)}"`;
+    record(`Screen changed after ${after}`, moved ? 'PASS' : 'FAIL', `"${titleBefore}" → "${titleAfter}"${status}`);
     return moved;
 }
 
@@ -171,7 +241,7 @@ describe('sap demo: SE16 → T000', () => {
         await quitSession(driver);
     });
 
-    it('opens the Data Browser from SAP Easy Access', async () => {
+    it('shows table T000 in the Data Browser, starting from SAP Easy Access', async () => {
         const failed = () => checks.filter((c) => c.status === 'FAIL');
 
         // 1. Home: the logged-in SAP Easy Access window, attached.
@@ -193,25 +263,34 @@ describe('sap demo: SE16 → T000', () => {
         record('Home screen', 'INFO', await describeScreen(driver));
 
         // 2. Open SE16. /n ends whatever runs in this session first, so it works from any screen.
-        if (await runTransaction(driver, '/nSE16')) {
-            record('SE16 screen', 'INFO', await describeScreen(driver));
-            try {
-                save('02-page-source-se16.xml', await driver.getPageSource());
-                record('Page source on SE16', 'PASS', 'saved 02-page-source-se16.xml');
-            } catch (err) {
-                record('Page source on SE16', 'FAIL', errMsg(err));
-            }
-            try {
-                record('Input fields on SE16', 'INFO', await listInputFields(driver));
-            } catch (err) {
-                record('Input fields on SE16', 'FAIL', errMsg(err));
+        //    Step 1 showed SE16 opens in the same window — no window switch needed.
+        const onSe16 = await runTransaction(driver, '/nSE16');
+        if (onSe16) {await captureScreen(driver, 'SE16', '02-page-source-se16.xml');}
+
+        // 3. Table name T000 + Enter ("Table Contents") → the table's selection screen.
+        const onSelection = onSe16
+            && await typeInto(driver, TABLE_NAME_FIELD, 'Table Name', TABLE)
+            && await pressAndWait(driver, ENTER_BUTTON, `Table Name ${TABLE}`);
+        if (onSelection) {await captureScreen(driver, 'selection screen', '03-page-source-selection.xml');}
+
+        // 4. Execute (found by tooltip on the application toolbar) → the table contents.
+        if (onSelection) {
+            const execute = await driver.$("//GuiToolbar[@Name='tbar[1]']//GuiButton[starts-with(@Tooltip,'Execute')]");
+            if (!(await execute.isExisting())) {
+                record('Find Execute button', 'INFO', 'no tbar[1] button with tooltip "Execute…" — see toolbar buttons above');
+            } else {
+                const selector = `~${shortId(await execute.elementId)}`;
+                record('Find Execute button', 'PASS', selector);
+                if (await pressAndWait(driver, selector, 'Execute')) {
+                    await captureScreen(driver, 'result', '04-page-source-result.xml');
+                }
             }
         }
 
-        // 3. Back home with /n, so the next run starts from SAP Easy Access again.
+        // 5. Back home with /n, so the next run starts from SAP Easy Access again.
         if (await runTransaction(driver, '/n')) {
             record('Back home', 'INFO', await describeScreen(driver));
-            save('03-page-source-back-home.xml', await driver.getPageSource());
+            save('05-page-source-back-home.xml', await driver.getPageSource());
         }
 
         expect(failed()).toEqual([]);
