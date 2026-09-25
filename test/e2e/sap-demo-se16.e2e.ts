@@ -1,8 +1,7 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Browser } from 'webdriverio';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
+import { ENTER_BUTTON, SapDemo, errMsg, refId } from './helpers/sap-demo.js';
 
 /**
  * Demo: a real SAP task driven end to end through standard WebDriver — from SAP Easy
@@ -23,20 +22,12 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo/: SUMMARY.md, plus the
- * page source of the screen a step failed on (failed-<step>.xml).
+ * Output in test-output/sap-demo/: SUMMARY.md, plus the page source of the screen a
+ * step failed on (failed-<step>.xml).
  *
  * Env:
  *   SAP_WINDOW_TITLE  partial title of the logged-in window (default: "SAP Easy")
  */
-const OUTPUT_DIR = resolve(process.cwd(), 'test-output', 'sap-demo');
-const WINDOW_TITLE = process.env.SAP_WINDOW_TITLE ?? 'SAP Easy';
-
-// SAP Ids, as seen in the page source of each screen.
-const OKCODE = '~wnd[0]/tbar[0]/okcd'; // command field, every screen
-const ENTER_BUTTON = '~wnd[0]/tbar[0]/btn[0]'; // green check mark = Enter, every screen
-const TITLE_BAR = '~wnd[0]/titl';
-const STATUS_BAR = '~wnd[0]/sbar';
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // SE16 initial screen
 const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)", selection screen
 const DISPLAY_BUTTON = '~wnd[0]/tbar[1]/btn[7]'; // "Display (F7)", result list
@@ -45,108 +36,7 @@ const TABLE = 'T000'; // SAP clients
 const CLIENT = '001';
 const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAER: 'EUR' };
 
-type Status = 'PASS' | 'FAIL' | 'INFO';
-
-interface Check {
-    step: string;
-    status: Status;
-    detail: string;
-}
-
-const checks: Check[] = [];
-
-function save(name: string, content: string): void {
-    writeFileSync(resolve(OUTPUT_DIR, name), content, 'utf8');
-}
-
-function record(step: string, status: Status, detail: string): void {
-    checks.push({ step, status, detail });
-    writeReport();
-}
-
-/** Rewritten after every check, so a crash midway still leaves everything seen so far. */
-function writeReport(): void {
-    const icon: Record<Status, string> = { PASS: '✅', FAIL: '❌', INFO: 'ℹ️' };
-    const lines = [
-        '# SAP demo: SE16 → T000',
-        '',
-        `Run: ${new Date().toISOString()}  `,
-        `PASS: ${checks.filter((c) => c.status === 'PASS').length} · FAIL: ${checks.filter((c) => c.status === 'FAIL').length}`,
-        '',
-        '| # | Status | Step | Detail |',
-        '| --- | --- | --- | --- |',
-        ...checks.map((c, i) =>
-            `| ${i + 1} | ${icon[c.status]} ${c.status} | ${c.step} | ${c.detail.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')} |`),
-        '',
-    ];
-    save('SUMMARY.md', lines.join('\n'));
-}
-
-function errMsg(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-}
-
-function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Records a failure along with the page source of the screen it happened on. */
-async function fail(driver: Browser, step: string, detail: string): Promise<false> {
-    const file = `failed-${step.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '')}.xml`;
-    try {
-        save(file, await driver.getPageSource());
-        detail += ` — page source in ${file}`;
-    } catch { /* noop */ }
-    record(step, 'FAIL', detail);
-    return false;
-}
-
-async function textOf(driver: Browser, selector: string): Promise<string> {
-    try {
-        const el = await driver.$(selector);
-        return (await el.isExisting()) ? await el.getText() : '(not found)';
-    } catch (err) {
-        return `(error: ${errMsg(err)})`;
-    }
-}
-
-async function typeInto(driver: Browser, selector: string, label: string, value: string): Promise<boolean> {
-    try {
-        await (await driver.$(selector)).setValue(value);
-        return true;
-    } catch (err) {
-        return fail(driver, `Type "${value}" in ${label}`, errMsg(err));
-    }
-}
-
-/**
- * Clicks a toolbar button and waits for SAP to move to the next screen (title bar
- * changes). Passes with the title SAP landed on.
- */
-async function pressAndWait(driver: Browser, selector: string, step: string, timeoutMs = 15_000): Promise<boolean> {
-    const before = await textOf(driver, TITLE_BAR);
-    try {
-        await (await driver.$(selector)).click();
-    } catch (err) {
-        return fail(driver, step, `click ${selector}: ${errMsg(err)}`);
-    }
-    const deadline = Date.now() + timeoutMs;
-    let now = before;
-    while (Date.now() < deadline) {
-        now = await textOf(driver, TITLE_BAR);
-        if (now !== before && !now.startsWith('(')) {
-            record(step, 'PASS', `→ "${now.replace(/\s{2,}/g, ' ')}"`);
-            return true;
-        }
-        await delay(500);
-    }
-    return fail(driver, step, `screen stayed "${now}"; status bar "${await textOf(driver, STATUS_BAR)}"`);
-}
-
-async function runTransaction(driver: Browser, tcode: string, step: string): Promise<boolean> {
-    return await typeInto(driver, OKCODE, 'command field', tcode)
-        && pressAndWait(driver, ENTER_BUTTON, step);
-}
+const demo = new SapDemo('sap-demo', 'SAP demo: SE16 → T000');
 
 /** `…/usr/lbl[9,6]` → { col: 9, row: 6 }. */
 function listPos(id: string): { col: number; row: number } | undefined {
@@ -184,12 +74,12 @@ async function readListEntry(driver: Browser, keyColumn: string, keyValue: strin
     // Every non-empty label on the header row is a column name.
     const columns: { name: string; col: number }[] = [];
     for (const e of await driver.findElements('xpath', `//GuiUserArea/GuiLabel[contains(@Id, ',${headerPos.row}]') and @Text!='']`)) {
-        const pos = listPos(Object.values(e)[0] as string);
+        const pos = listPos(refId(e));
         if (pos?.row === headerPos.row) {columns.push({ name: await (await driver.$(e)).getText(), col: pos.col });}
     }
 
     const rows = await driver.findElements('xpath', "//GuiUserArea/GuiCheckBox[contains(@Id, '/usr/chk[')]");
-    record('Read list headers', columns.length > 0 ? 'PASS' : 'FAIL',
+    demo.record('Read list headers', columns.length > 0 ? 'PASS' : 'FAIL',
         `${rows.length} row(s); columns ${columns.map((c) => c.name).join(', ')}`);
 
     const cell = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyValue}' and contains(@Id, 'lbl[${headerPos.col},')]`);
@@ -205,43 +95,28 @@ async function readListEntry(driver: Browser, keyColumn: string, keyValue: strin
 }
 
 describe('sap demo: SE16 → T000', () => {
-    let driver: Browser;
-
     beforeAll(async () => {
-        rmSync(OUTPUT_DIR, { recursive: true, force: true });
-        mkdirSync(OUTPUT_DIR, { recursive: true });
-        driver = await createSapGuiSession();
+        demo.resetOutput();
+        demo.driver = await createSapGuiSession();
     });
 
     afterAll(async () => {
-        try { await driver?.executeScript('windows: detachSapGui', []); } catch { /* noop */ }
-        await quitSession(driver);
+        try { await demo.driver?.executeScript('windows: detachSapGui', []); } catch { /* noop */ }
+        await quitSession(demo.driver);
     });
 
     it('shows table T000 in the Data Browser, starting from SAP Easy Access', async () => {
-        const failed = () => checks.filter((c) => c.status === 'FAIL');
-
-        // Home: the logged-in SAP Easy Access window, attached.
-        try {
-            await driver.executeScript('windows: switchToWindowByTitle', [{ title: WINDOW_TITLE }]);
-        } catch (err) {
-            record(`Switch to "${WINDOW_TITLE}"`, 'FAIL', `${errMsg(err)} — is SAP logged in and on SAP Easy Access?`);
-            expect(failed()).toEqual([]);
+        const driver = demo.driver;
+        if (!(await demo.attachHome())) {
+            expect(demo.failed).toEqual([]);
             return;
         }
-        const attach = await driver.executeScript('windows: attachSapGui', [{}]) as Record<string, unknown>;
-        if (!attach.attached) {
-            record('Attach', 'FAIL', JSON.stringify(attach));
-            expect(failed()).toEqual([]);
-            return;
-        }
-        record('Attach', 'PASS', `${attach.system}, "${await textOf(driver, TITLE_BAR)}"`);
 
         // 1–3. SE16 → T000 → Execute. /n ends whatever runs in this session first.
-        const onResult = await runTransaction(driver, '/nSE16', 'Open SE16')
-            && await typeInto(driver, TABLE_NAME_FIELD, 'Table Name', TABLE)
-            && await pressAndWait(driver, ENTER_BUTTON, `Table ${TABLE} → selection screen`)
-            && await pressAndWait(driver, EXECUTE_BUTTON, 'Execute → result list');
+        const onResult = await demo.runTransaction('/nSE16', 'Open SE16')
+            && await demo.typeInto(TABLE_NAME_FIELD, 'Table Name', TABLE)
+            && await demo.pressAndWait(ENTER_BUTTON, `Table ${TABLE} → selection screen`)
+            && await demo.pressAndWait(EXECUTE_BUTTON, 'Execute → result list');
 
         // 4. Read client 001 out of the list and check it.
         let clientRow: number | undefined;
@@ -250,14 +125,14 @@ describe('sap demo: SE16 → T000', () => {
                 const { entry, row } = await readListEntry(driver, 'MANDT', CLIENT);
                 const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => entry[k] !== v);
                 if (wrong.length === 0) {
-                    record(`Client ${CLIENT}`, 'PASS', `row ${row}: ${JSON.stringify(entry)}`);
+                    demo.record(`Client ${CLIENT}`, 'PASS', `row ${row}: ${JSON.stringify(entry)}`);
                     clientRow = row;
                 } else {
-                    await fail(driver, `Client ${CLIENT}`,
+                    await demo.fail(`Client ${CLIENT}`,
                         wrong.map(([k, v]) => `${k}: expected "${v}", read "${entry[k]}"`).join('; '));
                 }
             } catch (err) {
-                await fail(driver, `Client ${CLIENT}`, errMsg(err));
+                await demo.fail(`Client ${CLIENT}`, errMsg(err));
             }
         }
 
@@ -270,38 +145,38 @@ describe('sap demo: SE16 → T000', () => {
                 await box.click();
                 ticked = await box.isSelected();
                 if (ticked) {
-                    record(`Tick row ${CLIENT}`, 'PASS', `${checkbox} selected`);
+                    demo.record(`Tick row ${CLIENT}`, 'PASS', `${checkbox} selected`);
                 } else {
-                    await fail(driver, `Tick row ${CLIENT}`, `${checkbox} still not selected after click()`);
+                    await demo.fail(`Tick row ${CLIENT}`, `${checkbox} still not selected after click()`);
                 }
             } catch (err) {
-                await fail(driver, `Tick row ${CLIENT}`, `${checkbox}: ${errMsg(err)}`);
+                await demo.fail(`Tick row ${CLIENT}`, `${checkbox}: ${errMsg(err)}`);
             }
-            if (ticked && await pressAndWait(driver, DISPLAY_BUTTON, `Display → client ${CLIENT} detail`)) {
+            if (ticked && await demo.pressAndWait(DISPLAY_BUTTON, `Display → client ${CLIENT} detail`)) {
                 try {
                     const { values, editable } = await readDetail(driver, Object.keys(EXPECTED_CLIENT));
                     const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => values[k] !== v);
                     if (wrong.length === 0) {
-                        record(`Client ${CLIENT} detail`, 'PASS', `by name T000-*: ${JSON.stringify(values)}`);
+                        demo.record(`Client ${CLIENT} detail`, 'PASS', `by name T000-*: ${JSON.stringify(values)}`);
                     } else {
-                        await fail(driver, `Client ${CLIENT} detail`,
+                        await demo.fail(`Client ${CLIENT} detail`,
                             wrong.map(([k, v]) => `${k}: expected "${v}", read "${values[k]}"`).join('; '));
                     }
                     // Display mode: nothing on the detail screen may be editable.
                     if (editable.length === 0) {
-                        record('Detail is display-only', 'PASS', 'all fields Changeable=False');
+                        demo.record('Detail is display-only', 'PASS', 'all fields Changeable=False');
                     } else {
-                        await fail(driver, 'Detail is display-only', `editable: ${editable.join(', ')}`);
+                        await demo.fail('Detail is display-only', `editable: ${editable.join(', ')}`);
                     }
                 } catch (err) {
-                    await fail(driver, `Client ${CLIENT} detail`, errMsg(err));
+                    await demo.fail(`Client ${CLIENT} detail`, errMsg(err));
                 }
             }
         }
 
         // 6. Back home, so the next run starts from SAP Easy Access again.
-        await runTransaction(driver, '/n', 'Back to SAP Easy Access');
+        await demo.runTransaction('/n', 'Back to SAP Easy Access');
 
-        expect(failed()).toEqual([]);
+        expect(demo.failed).toEqual([]);
     }, 120_000);
 });
