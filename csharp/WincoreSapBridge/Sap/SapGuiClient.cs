@@ -40,6 +40,8 @@ internal sealed class SapGuiClient : IDisposable
     private const int MaxDepth = 200;
     private const string NodeKeyAttr = "__sapNodeKey";
     private const string NodeMarker = "#node:";
+    private const string RowMarker = "#row:";
+    private const string CellMarker = "#cell:";
 
     private Disp? _engine;
     private Disp? _session;
@@ -250,7 +252,41 @@ internal sealed class SapGuiClient : IDisposable
         return (Resolve(shellId), key);
     }
 
-    /// <summary>True if the element (component or tree node) is still on screen.</summary>
+    /// <summary>
+    /// ALV grid rows and cells are not SAP components either — a <c>GuiGridView</c>
+    /// addresses them by row index and column id. Row id: shell id + <c>#row:</c> + index;
+    /// cell id: shell id + <c>#cell:</c> + index + <c>:</c> + column id (last, since column
+    /// ids can contain '/', e.g. <c>/BIC/FIELD</c>).
+    /// </summary>
+    internal static string RowId(string shellId, int row) => IdPrefix + shellId + RowMarker + row;
+
+    internal static string CellId(string shellId, int row, string column) =>
+        IdPrefix + shellId + CellMarker + row + ":" + column;
+
+    /// <summary>The grid shell a row/cell id points into, the row index and (cells only) the column.</summary>
+    private (Disp Grid, int Row, string? Column)? ResolveGridItem(string elementId)
+    {
+        var raw = RawId(elementId);
+        int at = raw.IndexOf(RowMarker, StringComparison.Ordinal);
+        if (at >= 0 && int.TryParse(raw[(at + RowMarker.Length)..], out var row))
+            return (Resolve(raw[..at]), row, null);
+        at = raw.IndexOf(CellMarker, StringComparison.Ordinal);
+        if (at < 0) return null;
+        var rest = raw[(at + CellMarker.Length)..];
+        int colon = rest.IndexOf(':');
+        if (colon < 0 || !int.TryParse(rest[..colon], out var cellRow)) return null;
+        return (Resolve(raw[..at]), cellRow, rest[(colon + 1)..]);
+    }
+
+    private static bool IsVirtualId(string elementId)
+    {
+        var raw = RawId(elementId);
+        return raw.Contains(NodeMarker, StringComparison.Ordinal)
+            || raw.Contains(RowMarker, StringComparison.Ordinal)
+            || raw.Contains(CellMarker, StringComparison.Ordinal);
+    }
+
+    /// <summary>True if the element (component, tree node, grid row or cell) is still on screen.</summary>
     public bool Exists(string elementId)
     {
         try
@@ -262,6 +298,11 @@ internal sealed class SapGuiClient : IDisposable
                 for (int i = 0; i < n; i++)
                     if (keys!.Get("ElementAt", i)?.ToString() == key) return true;
                 return false;
+            }
+            if (ResolveGridItem(elementId) is var (grid, row, column))
+            {
+                if (row < 0 || row >= grid.GetInt("RowCount")) return false;
+                return column == null || GridColumns(grid).Contains(column);
             }
             Resolve(elementId);
             return true;
@@ -277,9 +318,9 @@ internal sealed class SapGuiClient : IDisposable
     /// </summary>
     public Disp Resolve(string elementId)
     {
-        if (TryParseNodeId(elementId, out _, out _))
+        if (IsVirtualId(elementId))
             throw new InvalidOperationException(
-                $"'{elementId}' is a SAP tree node, not a component; this command is not supported on it.");
+                $"'{elementId}' is a SAP tree node or grid row/cell, not a component; this command is not supported on it.");
         var raw = RawId(elementId);
         var comp = SessionOrThrow().CallObjOrNull("FindById", raw, false);
         if (comp == null)
@@ -551,47 +592,124 @@ internal sealed class SapGuiClient : IDisposable
 
         // Virtualised controls whose rows/nodes are not children.
         // Grids and trees are shells: Type "GuiShell", kind in SubType ("GridView", "Tree").
-        try { if (subType == "GridView") AppendGridRows(doc, el, component); } catch { }
+        try { if (subType == "GridView") AppendGridRows(doc, el, component, sapId, nodeToId, nextNodeKey); } catch { }
         try { if (subType == "Tree") AppendTreeNodes(doc, el, component, sapId, nodeToId, nextNodeKey); } catch { }
 
         return el;
     }
 
     /// <summary>
-    /// <c>GuiGridView</c> (ALV grid — a <c>GuiShell</c> with <c>SubType</c> "GridView") does not expose cells through <c>Children</c> — rows
-    /// are virtualised and addressed by index + column id. Emit the visible rows as
-    /// <c>GridRow</c> / <c>GridCell</c> children so they show up in page source and are
-    /// XPath-addressable. Full row access still needs scrolling via the Actions layer.
+    /// <c>GuiGridView</c> (ALV grid — a <c>GuiShell</c> with <c>SubType</c> "GridView") does
+    /// not expose cells through <c>Children</c> — rows are virtualised and addressed by
+    /// index + column id. Emit the visible rows as <c>GridRow</c> / <c>GridCell</c>
+    /// children and — for XPath — map them to row / cell element ids, so a test can act on
+    /// them. Cells carry the column id (<c>Column</c>, e.g. MANDT) and the header the user
+    /// sees (<c>Title</c>, e.g. "Client"). Rows beyond the visible page need scrolling.
     /// </summary>
-    private static void AppendGridRows(XmlDocument doc, XmlElement parent, Disp component)
+    private static void AppendGridRows(
+        XmlDocument doc,
+        XmlElement parent,
+        Disp grid,
+        string shellId,
+        Dictionary<string, string>? nodeToId,
+        Func<string>? nextNodeKey)
     {
-        int rowCount = component.GetInt("RowCount");
-        int firstVisible = component.GetInt("FirstVisibleRow");
-        int visibleRows = component.GetInt("VisibleRowCount");
+        int rowCount = grid.GetInt("RowCount");
+        int firstVisible = grid.GetInt("FirstVisibleRow");
+        int visibleRows = grid.GetInt("VisibleRowCount");
         if (visibleRows <= 0) visibleRows = rowCount;
-        var columnOrder = component.GetObjOrNull("ColumnOrder");
-        int colCount = columnOrder?.GetInt("Count") ?? 0;
+        var columns = GridColumns(grid);
+        var titles = columns.ToDictionary(c => c, c => Sanitize(grid.GetString("GetDisplayedColumnTitle", c)));
+
+        void Map(XmlElement el, string elementId)
+        {
+            if (nodeToId == null || nextNodeKey == null) return;
+            var key = nextNodeKey();
+            el.SetAttribute(NodeKeyAttr, key);
+            nodeToId[key] = elementId;
+        }
 
         int lastRow = Math.Min(rowCount, firstVisible + visibleRows);
         for (int r = firstVisible; r < lastRow; r++)
         {
             var rowEl = doc.CreateElement("GridRow");
+            Map(rowEl, RowId(shellId, r));
             rowEl.SetAttribute("Index", r.ToString());
-            for (int c = 0; c < colCount; c++)
+            foreach (var colId in columns)
             {
-                string colId;
-                try { colId = columnOrder!.Get("ElementAt", c)?.ToString() ?? ""; }
-                catch { continue; }
-                if (colId.Length == 0) continue;
                 var cellEl = doc.CreateElement("GridCell");
+                Map(cellEl, CellId(shellId, r, colId));
                 cellEl.SetAttribute("Column", colId);
-                cellEl.SetAttribute("Text", Sanitize(component.GetString("GetCellValue", r, colId)));
+                cellEl.SetAttribute("Title", titles[colId]);
+                cellEl.SetAttribute("Text", Sanitize(grid.GetString("GetCellValue", r, colId)));
                 rowEl.AppendChild(cellEl);
             }
             parent.AppendChild(rowEl);
         }
         parent.SetAttribute("RowCount", rowCount.ToString());
     }
+
+    /// <summary>A grid's column ids in display order.</summary>
+    private static List<string> GridColumns(Disp grid)
+    {
+        var result = new List<string>();
+        var order = grid.GetObjOrNull("ColumnOrder");
+        int n = order?.GetInt("Count") ?? 0;
+        for (int c = 0; c < n; c++)
+        {
+            try
+            {
+                var id = order!.Get("ElementAt", c)?.ToString() ?? "";
+                if (id.Length > 0) result.Add(id);
+            }
+            catch { }
+        }
+        return result;
+    }
+
+    /// <summary><c>SelectedRows</c> is a string like "0,2,4-6"; true if <paramref name="row"/> is in it.</summary>
+    private static bool IsRowSelected(Disp grid, int row)
+    {
+        var parts = grid.GetString("SelectedRows")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var part in parts)
+        {
+            var range = part.Split('-');
+            if (range.Length == 2 && int.TryParse(range[0], out var a) && int.TryParse(range[1], out var b))
+            {
+                if (row >= a && row <= b) return true;
+            }
+            else if (int.TryParse(part, out var single) && single == row)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static object? GetGridProperty(Disp grid, int row, string? column, string elementId, string property)
+    {
+        return property.ToLowerInvariant() switch
+        {
+            "id" => RawId(elementId),
+            "type" or "tagname" or "classname" or "controltype" or "localizedcontroltype" =>
+                column == null ? "GridRow" : "GridCell",
+            "index" or "row" => row.ToString(),
+            "column" => column,
+            "title" => column == null ? null : grid.GetString("GetDisplayedColumnTitle", column),
+            "text" or "value" => column == null ? GridRowText(grid, row) : grid.GetString("GetCellValue", row, column),
+            "selected" or "isselected" => column == null
+                ? IsRowSelected(grid, row)
+                : grid.GetInt("CurrentCellRow") == row && grid.GetString("CurrentCellColumn") == column,
+            "changeable" or "enabled" or "isenabled" =>
+                column == null || grid.GetBool("IsCellChangeable", row, column),
+            _ => null,
+        };
+    }
+
+    /// <summary>A row's text: its cell values in column order, tab-separated.</summary>
+    private static string GridRowText(Disp grid, int row) =>
+        string.Join("\t", GridColumns(grid).Select(c => grid.GetString("GetCellValue", row, c)));
 
     /// <summary>
     /// <c>GuiTree</c> (a <c>GuiShell</c> with <c>SubType</c> "Tree") nodes are addressed by
@@ -680,6 +798,8 @@ internal sealed class SapGuiClient : IDisposable
     {
         if (ResolveNode(elementId) is var (tree, key))
             return GetNodeProperty(tree, key, elementId, property);
+        if (ResolveGridItem(elementId) is var (grid, row, column))
+            return GetGridProperty(grid, row, column, elementId, property);
         var comp = Resolve(elementId);
         return property.ToLowerInvariant() switch
         {
@@ -742,13 +862,20 @@ internal sealed class SapGuiClient : IDisposable
             ? IsNodeSelected(tree, key)
             : GetProperty(elementId, "Selected") is bool b && b;
 
-    public string GetText(string elementId) =>
-        ResolveNode(elementId) is var (tree, key)
-            ? tree.GetString("GetNodeTextByKey", key)
-            : Resolve(elementId).GetString("Text");
+    public string GetText(string elementId)
+    {
+        if (ResolveNode(elementId) is var (tree, key)) return tree.GetString("GetNodeTextByKey", key);
+        if (ResolveGridItem(elementId) is var (grid, row, column))
+            return column == null ? GridRowText(grid, row) : grid.GetString("GetCellValue", row, column);
+        return Resolve(elementId).GetString("Text");
+    }
 
-    public string GetTagName(string elementId) =>
-        ResolveNode(elementId) is not null ? "TreeNode" : Resolve(elementId).GetString("Type");
+    public string GetTagName(string elementId)
+    {
+        if (ResolveNode(elementId) is not null) return "TreeNode";
+        if (ResolveGridItem(elementId) is var (_, _, column)) return column == null ? "GridRow" : "GridCell";
+        return Resolve(elementId).GetString("Type");
+    }
 
     public object GetRect(string elementId)
     {
@@ -757,6 +884,11 @@ internal sealed class SapGuiClient : IDisposable
                 "SAP tree nodes have no screen geometry in the scripting API, so they cannot be clicked with " +
                 "the mouse. Use windows: select (select the node), windows: invoke (double-click: opens the " +
                 "node / starts its transaction) or windows: expand instead.");
+        if (ResolveGridItem(elementId) is not null)
+            throw new NotSupportedException(
+                "SAP grid rows and cells have no screen geometry in the scripting API, so they cannot be clicked " +
+                "with the mouse. Use windows: select (select the row / make the cell current), windows: invoke " +
+                "(double-click the cell) or setValue (editable cells) instead.");
         var comp = Resolve(elementId);
         return new
         {
@@ -771,6 +903,12 @@ internal sealed class SapGuiClient : IDisposable
 
     public void SetValue(string elementId, string value)
     {
+        if (ResolveGridItem(elementId) is var (grid, row, column))
+        {
+            if (column == null) throw new NotSupportedException("setValue needs a grid cell, not a row.");
+            grid.Call("ModifyCell", row, column, value);
+            return;
+        }
         var comp = Resolve(elementId);
         switch (comp.GetString("Type"))
         {
@@ -798,6 +936,13 @@ internal sealed class SapGuiClient : IDisposable
             tree.Call("DoubleClickNode", key);
             return;
         }
+        // Same for a grid: double-click the cell (a row: its first column) — in most ALV
+        // reports that opens the entry's detail.
+        if (ResolveGridItem(elementId) is var (grid, row, column))
+        {
+            grid.Call("DoubleClick", row, column ?? GridColumns(grid).FirstOrDefault() ?? "");
+            return;
+        }
         var comp = Resolve(elementId);
         switch (comp.GetString("Type"))
         {
@@ -822,12 +967,19 @@ internal sealed class SapGuiClient : IDisposable
     public void SetFocus(string elementId)
     {
         if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
+        else if (ResolveGridItem(elementId) is not null) Select(elementId);
         else Resolve(elementId).Call("SetFocus");
     }
 
     public void Select(string elementId)
     {
         if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
+        // A row: select it (like clicking its row marker); a cell: make it the current cell.
+        else if (ResolveGridItem(elementId) is var (grid, row, column))
+        {
+            if (column == null) grid.Set("SelectedRows", row.ToString());
+            else grid.Call("SetCurrentCell", row, column);
+        }
         else Resolve(elementId).Call("Select");
     }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
-import { ENTER_BUTTON, SapDemo, errMsg, refId, shortId } from './helpers/sap-demo.js';
+import { ENTER_BUTTON, SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
 
 /**
  * Demo: ALV grid, and a popup on the way. SE16N doesn't exist on this system, and SE16
@@ -13,9 +13,13 @@ import { ENTER_BUTTON, SapDemo, errMsg, refId, shortId } from './helpers/sap-dem
  *             its own window, served by the same attach). Data Browser tab: radio
  *             buttons "ALV Grid Display" / "ALV List" / "Standard SE16 list";
  *             buttons "Transfer (Enter)" / "Cancel (F12)".
- *   Step 2    pick "ALV Grid Display", Transfer; T000 → Execute → wait for the grid
- *             (GuiShell SubType GridView) and capture it; restore "Standard SE16 list".
- *   Next: read client 001 out of the grid by column.
+ *   Step 2 ✅ pick "ALV Grid Display", Transfer; T000 → Execute → grid
+ *             (GuiShell SubType GridView, 2 GridRow, 17 GridCell each); restore
+ *             "Standard SE16 list". XPath found no GridRow/GridCell yet: they had no
+ *             element ids — the bridge now maps them (like tree nodes).
+ *   Step 3    read client 001 from the grid: the GridRow whose MANDT cell is 001, then
+ *             its cells by Column; record the column titles users see; select the row
+ *             with windows: select.
  *
  * Ends with /n back to SAP Easy Access.
  *
@@ -30,6 +34,8 @@ const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)", selection sc
 const TRANSFER_BUTTON = "//GuiButton[starts-with(@Tooltip,'Transfer')]"; // in the popup
 const GRID = "//GuiShell[@SubType='GridView']";
 const TABLE = 'T000';
+const CLIENT = '001';
+const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAER: 'EUR' };
 
 const ALV_GRID = 'ALV Grid Display';
 const STANDARD_LIST = 'Standard SE16 list';
@@ -102,15 +108,37 @@ describe('sap demo: SE16 ALV grid', () => {
                     }
                     await demo.captureScreen('Result', '01-page-source-grid.xml');
 
-                    // What the synthetic grid elements look like to a find — ids decide
-                    // whether cells can be acted on yet.
-                    for (const xpath of [`${GRID}//GridRow`, `${GRID}//GridCell[@Column='MANDT']`]) {
-                        try {
-                            const refs = await driver.findElements('xpath', xpath);
-                            demo.record(`Find ${xpath}`, 'INFO',
-                                `${refs.length} found${refs.length ? `; first ids ${JSON.stringify(refs.slice(0, 2).map(refId))}` : ''}`);
-                        } catch (err) {
-                            demo.record(`Find ${xpath}`, 'INFO', `threw: ${errMsg(err)}`);
+                    // 3. Read client 001 out of the grid: the row whose MANDT cell is 001,
+                    //    then that row's cells by column.
+                    const row = `${GRID}//GridRow[GridCell[@Column='MANDT' and @Text='${CLIENT}']]`;
+                    const rowEl = await driver.$(row);
+                    if (!(await rowEl.isExisting())) {
+                        await demo.fail(`Find row ${CLIENT}`, `no ${row}`);
+                    } else {
+                        demo.record(`Find row ${CLIENT}`, 'PASS', await rowEl.elementId);
+                        const values: Record<string, string> = {};
+                        const titles: string[] = [];
+                        for (const col of Object.keys(EXPECTED_CLIENT)) {
+                            const cell = await driver.$(`${row}/GridCell[@Column='${col}']`);
+                            values[col] = await cell.getText();
+                            titles.push(`${col} = "${await cell.getAttribute('Title')}"`);
+                        }
+                        const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => values[k] !== v);
+                        if (wrong.length === 0) {
+                            demo.record(`Client ${CLIENT} from grid`, 'PASS', JSON.stringify(values));
+                        } else {
+                            await demo.fail(`Client ${CLIENT} from grid`,
+                                wrong.map(([k, v]) => `${k}: expected "${v}", read "${values[k]}"`).join('; '));
+                        }
+                        demo.record('Column titles', 'INFO', titles.join('\n'));
+
+                        // 4. Select the row, like clicking its row marker.
+                        await driver.executeScript('windows: select', [{ elementId: await rowEl.elementId }]);
+                        const selected = String(await rowEl.getAttribute('IsSelected')).toLowerCase() === 'true';
+                        if (selected) {
+                            demo.record(`Select row ${CLIENT}`, 'PASS', 'IsSelected=true');
+                        } else {
+                            await demo.fail(`Select row ${CLIENT}`, 'IsSelected not true after windows: select');
                         }
                     }
                 }

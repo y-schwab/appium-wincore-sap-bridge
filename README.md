@@ -99,6 +99,21 @@ await driver.executeScript('windows: invoke', [{ elementId: editor.elementId }])
 screen position for a node, so use `windows: select` / `windows: invoke` instead.
 `windows: collapse` is not routed to bridges by the driver yet.
 
+ALV grid rows and cells work the same way. Each `GridCell` carries `Column` (the column
+id, e.g. `MANDT`), `Title` (the header the user sees) and `Text`; XPath returns rows as
+`sap:<grid shell id>#row:<index>` and cells as `sap:<grid shell id>#cell:<index>:<column>`:
+
+```js
+const row = "//GuiShell[@SubType='GridView']//GridRow[GridCell[@Column='MANDT' and @Text='001']]";
+await driver.$(`${row}/GridCell[@Column='MTEXT']`).getText();                       // "SAP SE"
+await driver.executeScript('windows: select', [{ elementId: await driver.$(row).elementId }]); // select the row
+```
+
+`windows: select` selects a row or makes a cell the current cell, `windows: invoke`
+double-clicks a cell, `setValue` writes an editable cell. Only the visible page of rows is
+listed. Like tree nodes, rows and cells have no screen geometry, so plain `click()` is
+not supported.
+
 ## Testing
 
 The e2e suite is currently scaled down to `sap-discovery.e2e.ts`: it launches SAP Logon
