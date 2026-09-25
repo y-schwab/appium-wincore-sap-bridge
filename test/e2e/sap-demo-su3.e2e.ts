@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Browser } from 'webdriverio';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
-import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
+import { STATUS_BAR, SapDemo, TITLE_BAR, delay, errMsg } from './helpers/sap-demo.js';
 
 /**
  * Demo: edit & save round trip in SU3 (Maintain Own User Data — only touches the
@@ -10,8 +10,11 @@ import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
  *
  *   Step 1 ✅ /nSU3 → "Maintain User Profile", already in change mode, same window.
  *             Tabs Address / Defaults / Parameters; Save = tbar[0]/btn[11].
- *   Step 2    Address tab: set Department to a fresh value, Save, check the status
- *             bar message; leave, reopen SU3 and check the value stuck.
+ *   Step 2 ✅ Address tab: set Department to a fresh value, Save ("User DEVELOPER has
+ *             changed"); leave (/n may land on SAP's start screen first), reopen SU3,
+ *             check the value stuck.
+ *   Step 3    the popup: change again, Back without saving → "save first?" popup
+ *             (wnd[1]) → capture it, answer Yes; reopen and check the value stuck.
  *
  * Fields are found by their visible label, like a user would: a label and its input
  * share the SAP Name (SUID_ST_NODE_WORKPLACE-DEPARTMENT), so the plain `name` locator
@@ -23,13 +26,16 @@ import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo-su3/: SUMMARY.md, plus the page source of anything
- * unexpected (a popup after Save) and of the screen a step failed on (failed-<step>.xml).
+ * Output in test-output/sap-demo-su3/: SUMMARY.md, the save popup's page source, plus
+ * the page source of the screen a step failed on (failed-<step>.xml).
  */
 // The field next to the "Department" label: SAP gives a label and its input the same
 // Name, so find the label by its visible text and take the text field with that Name.
 const DEPARTMENT = "//GuiTextField[@Name=//GuiLabel[@Text='Department']/@Name]";
 const SAVE_BUTTON = '~wnd[0]/tbar[0]/btn[11]'; // "Save (Ctrl+S)"
+const BACK_BUTTON = '~wnd[0]/tbar[0]/btn[3]'; // "Back (F3)"
+// In the popup: by visible text or tooltip — checked against the capture on the first run.
+const YES_BUTTON = "//GuiButton[normalize-space(@Text)='Yes' or starts-with(@Tooltip,'Yes')]";
 
 const demo = new SapDemo('sap-demo-su3', 'SAP demo: SU3 own user data');
 
@@ -94,17 +100,48 @@ describe('sap demo: SU3', () => {
         }
 
         // 3. Leave, come back, check the value stuck.
-        if (saved && await demo.backHome()
-            && await demo.runTransaction('/nSU3', 'Reopen SU3', 'Maintain User Profile')) {
+        const reopenedWith = async (value: string, step: string): Promise<boolean> => {
+            if (!(await demo.backHome()
+                && await demo.runTransaction('/nSU3', 'Reopen SU3', 'Maintain User Profile'))) {return false;}
             try {
                 const now = await (await department(driver)).getText();
-                if (now === newValue) {
-                    demo.record('Department after reopen', 'PASS', `"${now}"`);
-                } else {
-                    await demo.fail('Department after reopen', `expected "${newValue}", read "${now}"`);
+                if (now === value) {
+                    demo.record(step, 'PASS', `"${now}"`);
+                    return true;
+                }
+                return demo.fail(step, `expected "${value}", read "${now}"`);
+            } catch (err) {
+                return demo.fail(step, errMsg(err));
+            }
+        };
+        const round1 = saved && await reopenedWith(newValue, 'Department after reopen');
+
+        // 4. Round 2, the popup: change again and press Back without saving. SAP asks
+        //    whether to save first (a popup, wnd[1] — its own window); answer Yes.
+        if (round1) {
+            const value2 = `${newValue} B`;
+            try {
+                await (await department(driver)).setValue(value2);
+                demo.record('Change Department again', 'PASS', `→ "${value2}", not saved`);
+                const popup = await demo.openPopup(BACK_BUTTON, 'Back with unsaved change → popup');
+                if (popup) {
+                    await demo.captureScreen('Save popup', '01-page-source-save-popup.xml');
+                    const yes = await driver.$(YES_BUTTON);
+                    if (await yes.isExisting()) {
+                        await yes.click();
+                        const closed = await driver.waitUntil(
+                            async () => !(await driver.getWindowHandles()).includes(popup),
+                            { timeout: 10_000 }).then(() => true, () => false);
+                        await driver.switchToWindow(demo.mainWindow);
+                        demo.record('Answer Yes', closed ? 'PASS' : 'FAIL',
+                            `popup ${closed ? 'closed' : 'still open'}; now "${await demo.textOf(TITLE_BAR)}", status bar "${await demo.textOf(STATUS_BAR)}"`);
+                        if (closed) {await reopenedWith(value2, 'Department after Yes');}
+                    } else {
+                        await demo.fail('Answer Yes', 'no "Yes" button in the popup — see buttons above');
+                    }
                 }
             } catch (err) {
-                await demo.fail('Department after reopen', errMsg(err));
+                await demo.fail('Popup round', errMsg(err));
             }
         }
 

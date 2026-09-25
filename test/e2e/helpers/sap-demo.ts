@@ -265,6 +265,9 @@ export class SapDemo {
         // Main window: the application toolbar; a popup: all of its buttons.
         const buttons = await list("//GuiToolbar[@Name='tbar[1]']//GuiButton | //GuiModalWindow//GuiButton", async (el, id) =>
             `${id} "${await el.getAttribute('Tooltip')}"`);
+        // A popup's message sits in labels / read-only text fields of the modal window.
+        const popupTexts = (await list("//GuiModalWindow//GuiUserArea//*[self::GuiLabel or self::GuiTextField][@Text!='']",
+            async (el) => (await el.getText()).trim())).filter((t) => t !== '(none)');
         const shells = [...xml.matchAll(/<GuiShell\b[^>]*\bId="([^"]*)"[^>]*\bSubType="([^"]*)"/g)]
             .map((m) => `${m[2]} ${shortId(m[1])}`);
         const gridRows = (xml.match(/<GridRow\b/g) ?? []).length;
@@ -276,6 +279,7 @@ export class SapDemo {
             `page source in ${file} (${xml.length} chars)`,
             '— tabs —', ...tabs,
             '— fields —', ...fields,
+            ...(popupTexts.length ? ['— popup text —', ...popupTexts] : []),
             '— buttons —', ...buttons,
             '— shells —', ...(shells.length ? shells : ['(none)']),
             `GridRow: ${gridRows}, GridCell: ${gridCells}`,
