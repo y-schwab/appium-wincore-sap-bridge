@@ -58,5 +58,10 @@ Display-only, built step by step like the others.
 
 - [ ] Route `windows: collapse` to the SAP bridge, so tree folders can be
   collapsed.
+- [ ] Screen recording: `captureCursor` / `captureClicks` are passed to ffmpeg
+  as `-capture_cursor` / `-capture_mouse_clicks` (macOS avfoundation
+  options). Windows' gdigrab rejects them and ffmpeg exits, so
+  `windows: startRecordingScreen` fails. Map `captureCursor` to
+  `-draw_mouse`; gdigrab can't highlight clicks.
 - [ ] Decide whether SAP function keys (F2, F8, …) need a command. Pressing
   toolbar buttons covers them so far; the bridge's `sendVKey` is disabled.

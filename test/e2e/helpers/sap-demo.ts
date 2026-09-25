@@ -67,9 +67,10 @@ export class SapDemo {
     async startRecording(): Promise<void> {
         if (process.env.SAP_DEMO_RECORD !== '1') {return;}
         try {
-            await this.driver.executeScript('windows: startRecordingScreen', [{
-                captureCursor: true, captureClicks: true, timeLimit: 600, videoFps: 15,
-            }]);
+            // No captureCursor / captureClicks: the driver passes them to ffmpeg as macOS
+            // (avfoundation) options, which Windows' gdigrab rejects, and ffmpeg exits.
+            // gdigrab draws the mouse pointer by default anyway.
+            await this.driver.executeScript('windows: startRecordingScreen', [{ timeLimit: 600, videoFps: 15 }]);
             this.record('Start screen recording', 'INFO', 'windows: startRecordingScreen');
         } catch (err) {
             this.record('Start screen recording', 'FAIL', errMsg(err));
