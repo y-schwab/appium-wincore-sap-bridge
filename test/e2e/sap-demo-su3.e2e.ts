@@ -13,8 +13,10 @@ import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
  *   Step 2    Address tab: set Department to a fresh value, Save, check the status
  *             bar message; leave, reopen SU3 and check the value stuck.
  *
- * Fields are found by SAP Name (the `name` locator): their Ids carry the subscreen
- * path (…/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/…), which the Name doesn't.
+ * Fields are found by their visible label, like a user would: a label and its input
+ * share the SAP Name (SUID_ST_NODE_WORKPLACE-DEPARTMENT), so the plain `name` locator
+ * alone would hit the label first. Their Ids carry the subscreen path
+ * (…/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/…), so they're avoided too.
  *
  * Ends with /n back to SAP Easy Access. Leaves the new Department value in place —
  * every run writes a new one, so the check never passes on a stale value.
@@ -24,13 +26,15 @@ import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
  * Output in test-output/sap-demo-su3/: SUMMARY.md, plus the page source of anything
  * unexpected (a popup after Save) and of the screen a step failed on (failed-<step>.xml).
  */
-const DEPARTMENT = 'SUID_ST_NODE_WORKPLACE-DEPARTMENT';
+// The field next to the "Department" label: SAP gives a label and its input the same
+// Name, so find the label by its visible text and take the text field with that Name.
+const DEPARTMENT = "//GuiTextField[@Name=//GuiLabel[@Text='Department']/@Name]";
 const SAVE_BUTTON = '~wnd[0]/tbar[0]/btn[11]'; // "Save (Ctrl+S)"
 
 const demo = new SapDemo('sap-demo-su3', 'SAP demo: SU3 own user data');
 
 async function department(driver: Browser) {
-    return driver.$(await driver.findElement('name', DEPARTMENT));
+    return driver.$(DEPARTMENT);
 }
 
 describe('sap demo: SU3', () => {
