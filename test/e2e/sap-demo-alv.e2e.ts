@@ -1,17 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
-import { ENTER_BUTTON, SapDemo, delay, errMsg, shortId } from './helpers/sap-demo.js';
+import { SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
 
 /**
- * Demo: ALV grid. SE16N (General Table Display) shows table contents in an ALV grid
- * (a GuiShell with SubType "GridView") without changing any user setting — unlike
- * SE16, which shows a classic list for this user. Built step by step: each step
- * captures the screen it lands on, the next one is written from what SAP showed.
+ * Demo: ALV grid. SE16N doesn't exist on this system, and SE16 shows a classic list for
+ * this user — its output format is a per-user setting in SE16's "User Parameters"
+ * popup (list vs. ALV grid). So this test switches it to ALV grid through that popup
+ * (exercising popups, wnd[1], on the way), reads T000 from the grid, and switches it
+ * back at the end. Built step by step: each step captures the screen it lands on, the
+ * next one is written from what SAP actually showed.
  *
- *   Step 1 (this version): /nSE16N → capture. If the table field is there (GD-TAB,
- *   SE16N's usual one), enter T000, Enter, press the tbar[1] button whose tooltip
- *   starts with "Execute" and capture the result: grid shell, GridRow / GridCell.
- *   Next: read client 001 out of the grid by column (GridCell @Column).
+ *   Step 1 (this version): /nSE16 → User Parameters (F6) → capture the popup →
+ *   close it with its Cancel button, changing nothing.
+ *   Next: pick "ALV Grid display" in the popup, T000 → Execute → grid; restore.
  *
  * Ends with /n back to SAP Easy Access.
  *
@@ -20,13 +21,11 @@ import { ENTER_BUTTON, SapDemo, delay, errMsg, shortId } from './helpers/sap-dem
  * Output in test-output/sap-demo-alv/: SUMMARY.md, page source of each explored
  * screen, plus the page source of the screen a step failed on (failed-<step>.xml).
  */
-const TABLE_FIELD = "//GuiCTextField[@Name='GD-TAB']"; // guess from SE16N — verified by step 1
-const GRID = "//GuiShell[@SubType='GridView']";
-const TABLE = 'T000';
+const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... (F6)", SE16 initial screen
 
-const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16N ALV grid');
+const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16 ALV grid');
 
-describe('sap demo: SE16N ALV grid', () => {
+describe('sap demo: SE16 ALV grid', () => {
     beforeAll(async () => {
         demo.resetOutput();
         demo.driver = await createSapGuiSession();
@@ -45,41 +44,29 @@ describe('sap demo: SE16N ALV grid', () => {
         }
 
         try {
-            if (await demo.runTransaction('/nSE16N', 'Open SE16N')) {
-                await demo.captureScreen('SE16N', '01-page-source-se16n.xml');
+            const popup = await demo.runTransaction('/nSE16', 'Open SE16', 'Data Browser')
+                && await demo.openPopup(USER_PARAMETERS_BUTTON, 'User Parameters → popup');
+            if (popup) {
+                await demo.captureScreen('User Parameters popup', '01-page-source-user-parameters.xml');
 
-                const tableField = await driver.$(TABLE_FIELD);
-                if (!(await tableField.isExisting())) {
-                    demo.record('Find table field', 'INFO', `no ${TABLE_FIELD} — see fields above`);
+                // Close without changing anything — the popup's own Cancel button, found by tooltip.
+                const cancel = await driver.$("//GuiButton[starts-with(@Tooltip,'Cancel')]");
+                if (await cancel.isExisting()) {
+                    const id = shortId(await cancel.elementId);
+                    await cancel.click();
+                    const closed = await driver.waitUntil(
+                        async () => !(await driver.getWindowHandles()).includes(popup),
+                        { timeout: 10_000 }).then(() => true, () => false);
+                    demo.record('Cancel popup', closed ? 'PASS' : 'FAIL', `${id}; popup ${closed ? 'closed' : 'still open'}`);
                 } else {
-                    await tableField.setValue(TABLE);
-                    // SE16N stays on the same screen after Enter (it loads the table's
-                    // selection fields), so no title change to wait for.
-                    await (await driver.$(ENTER_BUTTON)).click();
-                    await delay(1500);
-                    demo.record(`Table ${TABLE} + Enter`, 'PASS', `status bar "${await demo.textOf('~wnd[0]/sbar')}"`);
-
-                    const execute = await driver.$("//GuiToolbar[@Name='tbar[1]']//GuiButton[starts-with(@Tooltip,'Execute')]");
-                    if (!(await execute.isExisting())) {
-                        await demo.captureScreen('SE16N after Enter', '02-page-source-se16n-table.xml');
-                        demo.record('Find Execute button', 'INFO', 'no tbar[1] button with tooltip "Execute…"');
-                    } else {
-                        demo.record('Find Execute button', 'PASS', shortId(await execute.elementId));
-                        await execute.click();
-                        // Wait for the grid rather than a title change — it's what we're after.
-                        const grid = await driver.$(GRID);
-                        const found = await grid.waitForExist({ timeout: 15_000 }).then(() => true, () => false);
-                        demo.record('Grid appears after Execute', found ? 'PASS' : 'FAIL',
-                            found ? shortId(await grid.elementId) : `no ${GRID} within 15s`);
-                        await demo.captureScreen('Result', '03-page-source-result.xml');
-                    }
+                    demo.record('Cancel popup', 'FAIL', 'no button with tooltip "Cancel…" in the popup — see buttons above');
                 }
             }
         } catch (err) {
-            await demo.fail('SE16N flow', errMsg(err));
+            await demo.fail('SE16 user parameters', errMsg(err));
         }
 
-        await demo.runTransaction('/n', 'Back to SAP Easy Access');
+        await demo.backHome();
 
         expect(demo.failed).toEqual([]);
     }, 120_000);

@@ -175,7 +175,7 @@ describe('sap demo: SE16 → T000', () => {
         }
 
         // 6. Back home, so the next run starts from SAP Easy Access again.
-        await demo.runTransaction('/n', 'Back to SAP Easy Access');
+        await demo.backHome();
 
         expect(demo.failed).toEqual([]);
     }, 120_000);

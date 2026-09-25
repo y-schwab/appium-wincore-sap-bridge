@@ -45,7 +45,7 @@ describe('sap demo: SU3', () => {
             }
         }
 
-        await demo.runTransaction('/n', 'Back to SAP Easy Access');
+        await demo.backHome();
 
         expect(demo.failed).toEqual([]);
     }, 120_000);

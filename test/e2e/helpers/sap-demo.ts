@@ -46,6 +46,8 @@ export class SapDemo {
     readonly checks: Check[] = [];
     private readonly dir: string;
     driver!: Browser;
+    /** Handle of the SAP main window (wnd[0]), set by attachHome. */
+    mainWindow = '';
 
     constructor(outputName: string, private readonly title: string) {
         this.dir = resolve(process.cwd(), 'test-output', outputName);
@@ -109,12 +111,21 @@ export class SapDemo {
 
     /** Switches to the logged-in SAP Easy Access window and attaches. */
     async attachHome(): Promise<boolean> {
-        try {
-            await this.driver.executeScript('windows: switchToWindowByTitle', [{ title: WINDOW_TITLE }]);
-        } catch (err) {
-            this.record(`Switch to "${WINDOW_TITLE}"`, 'FAIL', `${errMsg(err)} — is SAP logged in and on SAP Easy Access?`);
-            return false;
+        // Retried: right after another test's /n the window can still be mid-reload.
+        const deadline = Date.now() + 15_000;
+        for (;;) {
+            try {
+                await this.driver.executeScript('windows: switchToWindowByTitle', [{ title: WINDOW_TITLE }]);
+                break;
+            } catch (err) {
+                if (Date.now() > deadline) {
+                    this.record(`Switch to "${WINDOW_TITLE}"`, 'FAIL', `${errMsg(err)} — is SAP logged in and on SAP Easy Access?`);
+                    return false;
+                }
+                await delay(1000);
+            }
         }
+        this.mainWindow = await this.driver.getWindowHandle();
         const attach = await this.driver.executeScript('windows: attachSapGui', [{}]) as Record<string, unknown>;
         if (!attach.attached) {
             this.record('Attach', 'FAIL', JSON.stringify(attach));
@@ -134,10 +145,11 @@ export class SapDemo {
     }
 
     /**
-     * Clicks a button and waits for SAP to move to the next screen (title bar changes).
-     * Passes with the title SAP landed on.
+     * Clicks a button and waits for SAP to move to the next screen: the title bar
+     * changes — to one containing `expectTitle`, when given (SAP shows a bare "SAP" in
+     * between while a screen reloads). Passes with the title SAP landed on.
      */
-    async pressAndWait(selector: string, step: string, timeoutMs = 15_000): Promise<boolean> {
+    async pressAndWait(selector: string, step: string, expectTitle?: string, timeoutMs = 15_000): Promise<boolean> {
         const before = await this.textOf(TITLE_BAR);
         try {
             await (await this.driver.$(selector)).click();
@@ -148,7 +160,7 @@ export class SapDemo {
         let now = before;
         while (Date.now() < deadline) {
             now = await this.textOf(TITLE_BAR);
-            if (now !== before && !now.startsWith('(')) {
+            if (now !== before && !now.startsWith('(') && (!expectTitle || now.includes(expectTitle))) {
                 this.record(step, 'PASS', `→ "${now.replace(/\s{2,}/g, ' ')}"`);
                 return true;
             }
@@ -157,9 +169,41 @@ export class SapDemo {
         return this.fail(step, `screen stayed "${now}"; status bar "${await this.textOf(STATUS_BAR)}"`);
     }
 
-    async runTransaction(tcode: string, step: string): Promise<boolean> {
+    async runTransaction(tcode: string, step: string, expectTitle?: string): Promise<boolean> {
         return await this.typeInto(OKCODE, 'command field', tcode)
-            && this.pressAndWait(ENTER_BUTTON, step);
+            && this.pressAndWait(ENTER_BUTTON, step, expectTitle);
+    }
+
+    /** /n back to SAP Easy Access, so the next test (or rerun) starts from there. */
+    async backHome(): Promise<boolean> {
+        if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
+        return this.runTransaction('/n', 'Back to SAP Easy Access', 'SAP Easy Access');
+    }
+
+    /**
+     * Clicks a button that opens a popup (wnd[1] — its own window) and switches to it.
+     * Returns the popup's handle, or undefined (recorded as FAIL) if none appeared.
+     */
+    async openPopup(selector: string, step: string, timeoutMs = 10_000): Promise<string | undefined> {
+        const before = new Set(await this.driver.getWindowHandles());
+        try {
+            await (await this.driver.$(selector)).click();
+        } catch (err) {
+            await this.fail(step, `click ${selector}: ${errMsg(err)}`);
+            return undefined;
+        }
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const added = (await this.driver.getWindowHandles()).filter((h) => !before.has(h));
+            if (added.length > 0) {
+                await this.driver.switchToWindow(added[0]);
+                this.record(step, 'PASS', `new window ${added[0]} "${await this.driver.getTitle()}"`);
+                return added[0];
+            }
+            await delay(500);
+        }
+        await this.fail(step, `no new window within ${timeoutMs / 1000}s; status bar "${await this.textOf(STATUS_BAR)}"`);
+        return undefined;
     }
 
     /**
@@ -190,7 +234,8 @@ export class SapDemo {
                 const value = /\/(chk|rad)/.test(id) ? `selected=${await el.isSelected()}` : `"${await el.getText()}"`;
                 return `${id} = ${value}${changeable}`;
             });
-        const buttons = await list("//GuiToolbar[@Name='tbar[1]']//GuiButton", async (el, id) =>
+        // Main window: the application toolbar; a popup: all of its buttons.
+        const buttons = await list("//GuiToolbar[@Name='tbar[1]']//GuiButton | //GuiModalWindow//GuiButton", async (el, id) =>
             `${id} "${await el.getAttribute('Tooltip')}"`);
         const shells = [...xml.matchAll(/<GuiShell\b[^>]*\bId="([^"]*)"[^>]*\bSubType="([^"]*)"/g)]
             .map((m) => `${m[2]} ${shortId(m[1])}`);
@@ -198,12 +243,12 @@ export class SapDemo {
         const gridCells = (xml.match(/<GridCell\b/g) ?? []).length;
 
         this.record(`${label} screen`, 'INFO', [
-            `title "${await this.textOf(TITLE_BAR)}", status bar "${await this.textOf(STATUS_BAR)}"`,
-            `window ${await d.getWindowHandle()}, all windows ${JSON.stringify(await d.getWindowHandles())}`,
+            `window ${await d.getWindowHandle()} "${await d.getTitle()}", all windows ${JSON.stringify(await d.getWindowHandles())}`,
+            `status bar "${await this.textOf(STATUS_BAR)}"`,
             `page source in ${file} (${xml.length} chars)`,
             '— tabs —', ...tabs,
             '— fields —', ...fields,
-            '— tbar[1] —', ...buttons,
+            '— buttons —', ...buttons,
             '— shells —', ...(shells.length ? shells : ['(none)']),
             `GridRow: ${gridRows}, GridCell: ${gridCells}`,
         ].join('\n'));
