@@ -16,14 +16,14 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  *   4. Read client 001: SE16 shows a classic list here, not an ALV grid — every value is
  *      a GuiLabel whose Id is its position, lbl[column,row]. Find the header row, find
  *      the row whose MANDT is 001, read that row into a record and check it.
- *   5. (in progress) tick the row's checkbox, Display (F7) → the entry's detail screen.
- *      Captured as 01-page-source-detail.xml + input fields in the summary, so the
- *      next step can read it from what SAP actually shows.
+ *   5. Tick the row's checkbox, Display (F7) → the entry's detail screen, an ordinary
+ *      form: read the fields by SAP Name (T000-MTEXT, …), check they match the list
+ *      and are all read-only.
  *   6. /n back to SAP Easy Access, so the test can be rerun as is.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo/: SUMMARY.md, the screen being explored, plus the
+ * Output in test-output/sap-demo/: SUMMARY.md, plus the
  * page source of the screen a step failed on (failed-<step>.xml).
  *
  * Env:
@@ -154,29 +154,19 @@ function listPos(id: string): { col: number; row: number } | undefined {
     return m ? { col: Number(m[1]), row: Number(m[2]) } : undefined;
 }
 
-/** Discovery: page source of a screen not scripted yet, plus its fields and buttons in the summary. */
-async function captureScreen(driver: Browser, label: string, file: string): Promise<void> {
-    save(file, await driver.getPageSource());
-    const strip = (id: string) => id.replace(/^sap:\/app\/con\[\d+\]\/ses\[\d+\]\//, '');
-    const rows: string[] = [];
-    for (const e of await driver.findElements('xpath',
-        '//GuiUserArea//*[self::GuiTextField or self::GuiCTextField or self::GuiCheckBox or self::GuiComboBox]')) {
-        const el = await driver.$(e);
-        const id = strip(Object.values(e)[0] as string);
-        const value = id.includes('/chk') ? `selected=${await el.isSelected()}` : `"${await el.getText()}"`;
-        rows.push(`${id} = ${value}`);
+/**
+ * Reads the detail screen of a T000 entry. Unlike the list, it's an ordinary form: every
+ * field has a SAP Name (T000-<column>), so the `name` locator finds it directly.
+ */
+async function readDetail(driver: Browser, columns: string[]): Promise<{ values: Record<string, string>; editable: string[] }> {
+    const values: Record<string, string> = {};
+    const editable: string[] = [];
+    for (const col of columns) {
+        const field = await driver.$(await driver.findElement('name', `T000-${col}`));
+        values[col] = await field.getText();
+        if (String(await field.getAttribute('Changeable')).toLowerCase() === 'true') {editable.push(col);}
     }
-    const buttons: string[] = [];
-    for (const e of await driver.findElements('xpath', "//GuiToolbar[@Name='tbar[1]']//GuiButton")) {
-        buttons.push(`${strip(Object.values(e)[0] as string)} "${await (await driver.$(e)).getAttribute('Tooltip')}"`);
-    }
-    record(`${label} screen`, 'INFO', [
-        `title "${await textOf(driver, TITLE_BAR)}", status bar "${await textOf(driver, STATUS_BAR)}"`,
-        `window ${await driver.getWindowHandle()}, all windows ${JSON.stringify(await driver.getWindowHandles())}`,
-        `page source in ${file}`,
-        '— fields —', ...(rows.length ? rows : ['(none)']),
-        '— tbar[1] —', ...(buttons.length ? buttons : ['(none)']),
-    ].join('\n'));
+    return { values, editable };
 }
 
 /**
@@ -289,9 +279,22 @@ describe('sap demo: SE16 → T000', () => {
             }
             if (ticked && await pressAndWait(driver, DISPLAY_BUTTON, `Display → client ${CLIENT} detail`)) {
                 try {
-                    await captureScreen(driver, 'Detail', '01-page-source-detail.xml');
+                    const { values, editable } = await readDetail(driver, Object.keys(EXPECTED_CLIENT));
+                    const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => values[k] !== v);
+                    if (wrong.length === 0) {
+                        record(`Client ${CLIENT} detail`, 'PASS', `by name T000-*: ${JSON.stringify(values)}`);
+                    } else {
+                        await fail(driver, `Client ${CLIENT} detail`,
+                            wrong.map(([k, v]) => `${k}: expected "${v}", read "${values[k]}"`).join('; '));
+                    }
+                    // Display mode: nothing on the detail screen may be editable.
+                    if (editable.length === 0) {
+                        record('Detail is display-only', 'PASS', 'all fields Changeable=False');
+                    } else {
+                        await fail(driver, 'Detail is display-only', `editable: ${editable.join(', ')}`);
+                    }
                 } catch (err) {
-                    record('Detail screen', 'FAIL', errMsg(err));
+                    await fail(driver, `Client ${CLIENT} detail`, errMsg(err));
                 }
             }
         }
