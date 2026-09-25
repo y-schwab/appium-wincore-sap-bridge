@@ -54,6 +54,40 @@ export class SapDemo {
         this.dir = resolve(process.cwd(), 'test-output', outputName);
     }
 
+    /**
+     * Demo pacing: waits SAP_DEMO_PACE_MS (default 0) before each user-visible action,
+     * so a recording can be followed by eye. No-op in normal runs.
+     */
+    async pause(): Promise<void> {
+        const ms = Number(process.env.SAP_DEMO_PACE_MS ?? 0);
+        if (ms > 0) {await delay(ms);}
+    }
+
+    /** Starts a screen recording (driver's windows: startRecordingScreen) when SAP_DEMO_RECORD=1. */
+    async startRecording(): Promise<void> {
+        if (process.env.SAP_DEMO_RECORD !== '1') {return;}
+        try {
+            await this.driver.executeScript('windows: startRecordingScreen', [{
+                captureCursor: true, captureClicks: true, timeLimit: 600, videoFps: 15,
+            }]);
+            this.record('Start screen recording', 'INFO', 'windows: startRecordingScreen');
+        } catch (err) {
+            this.record('Start screen recording', 'FAIL', errMsg(err));
+        }
+    }
+
+    /** Stops the recording and saves it next to SUMMARY.md. */
+    async stopRecording(file = 'recording.mp4'): Promise<void> {
+        if (process.env.SAP_DEMO_RECORD !== '1') {return;}
+        try {
+            const video = await this.driver.executeScript('windows: stopRecordingScreen', [{}]) as string;
+            writeFileSync(resolve(this.dir, file), Buffer.from(video, 'base64'));
+            this.record('Stop screen recording', 'INFO', `saved ${file} (${Math.round(video.length * 0.75 / 1024)} KB)`);
+        } catch (err) {
+            this.record('Stop screen recording', 'FAIL', errMsg(err));
+        }
+    }
+
     resetOutput(): void {
         rmSync(this.dir, { recursive: true, force: true });
         mkdirSync(this.dir, { recursive: true });
@@ -138,6 +172,7 @@ export class SapDemo {
 
     async typeInto(selector: string, label: string, value: string): Promise<boolean> {
         try {
+            await this.pause();
             await (await this.driver.$(selector)).setValue(value);
             return true;
         } catch (err) {
@@ -153,6 +188,7 @@ export class SapDemo {
     async pressAndWait(selector: string, step: string, expectTitle?: string, timeoutMs = 15_000): Promise<boolean> {
         const before = await this.textOf(TITLE_BAR);
         try {
+            await this.pause();
             await (await this.driver.$(selector)).click();
         } catch (err) {
             return this.fail(step, `click ${selector}: ${errMsg(err)}`);
@@ -185,6 +221,7 @@ export class SapDemo {
         await this.closePopups();
         if (!(await this.typeInto(OKCODE, 'command field', '/n'))) {return false;}
         try {
+            await this.pause();
             await (await this.driver.$(ENTER_BUTTON)).click();
         } catch (err) {
             return this.fail(step, `click ${ENTER_BUTTON}: ${errMsg(err)}`);
@@ -215,6 +252,7 @@ export class SapDemo {
     async openPopup(selector: string, step: string, timeoutMs = 10_000): Promise<string | undefined> {
         const before = new Set(await this.driver.getWindowHandles());
         try {
+            await this.pause();
             await (await this.driver.$(selector)).click();
         } catch (err) {
             await this.fail(step, `click ${selector}: ${errMsg(err)}`);

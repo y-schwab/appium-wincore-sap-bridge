@@ -27,6 +27,10 @@ import { ENTER_BUTTON, SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
+ * Demo recording (optional): SAP_DEMO_RECORD=1 records the screen from after attach to
+ * back home (driver's windows: start/stopRecordingScreen) into recording.mp4;
+ * SAP_DEMO_PACE_MS=1500 waits before each action so the video can be followed.
+ *
  * Output in test-output/sap-demo-alv/: SUMMARY.md, page source of each explored
  * screen, plus the page source of the screen a step failed on (failed-<step>.xml).
  */
@@ -58,6 +62,7 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
     try {
         for (const choice of choices) {
             const radio = await driver.$(`//GuiRadioButton[@Text='${choice}']`);
+            await demo.pause();
             await radio.click();
             if (!(await radio.isSelected())) {
                 return demo.fail(`Pick "${choice}"`, 'radio button not selected after click()');
@@ -65,6 +70,7 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
             demo.record(`Pick "${choice}"`, 'PASS', shortId(await radio.elementId));
         }
 
+        await demo.pause();
         await (await driver.$(TRANSFER_BUTTON)).click();
         const closed = await driver.waitUntil(
             async () => !(await driver.getWindowHandles()).includes(popup),
@@ -95,6 +101,7 @@ describe('sap demo: SE16 ALV grid', () => {
             expect(demo.failed).toEqual([]);
             return;
         }
+        await demo.startRecording();
 
         try {
             // 1. Switch SE16 to ALV grid output (lands back on SE16's initial screen).
@@ -103,6 +110,7 @@ describe('sap demo: SE16 ALV grid', () => {
                 const executed = await demo.typeInto(TABLE_NAME_FIELD, 'Table Name', TABLE)
                     && await demo.pressAndWait(ENTER_BUTTON, `Table ${TABLE} → selection screen`, 'Selection Screen');
                 if (executed) {
+                    await demo.pause();
                     await (await driver.$(EXECUTE_BUTTON)).click();
                     const grid = await driver.$(GRID);
                     const found = await grid.waitForExist({ timeout: 15_000 }).then(() => true, () => false);
@@ -145,8 +153,10 @@ describe('sap demo: SE16 ALV grid', () => {
                         }
 
                         // 4. Select the row, like clicking its row marker.
+                        await demo.pause();
                         await driver.executeScript('windows: select', [{ elementId: await rowEl.elementId }]);
                         const selected = String(await rowEl.getAttribute('IsSelected')).toLowerCase() === 'true';
+                        await demo.pause(); // let the selected row show in a recording
                         if (selected) {
                             demo.record(`Select row ${CLIENT}`, 'PASS', 'IsSelected=true');
                         } else {
@@ -164,7 +174,8 @@ describe('sap demo: SE16 ALV grid', () => {
         }
 
         await demo.backHome();
+        await demo.stopRecording();
 
         expect(demo.failed).toEqual([]);
-    }, 180_000);
+    }, 300_000);
 });
