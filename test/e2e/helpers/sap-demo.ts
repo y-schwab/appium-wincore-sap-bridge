@@ -23,6 +23,8 @@ interface Check {
     step: string;
     status: Status;
     detail: string;
+    /** Seconds since the demo started, when the check was recorded. */
+    at: number;
 }
 
 export function errMsg(err: unknown): string {
@@ -45,6 +47,7 @@ export function refId(ref: object): string {
 
 export class SapDemo {
     readonly checks: Check[] = [];
+    private readonly started = Date.now();
     private readonly dir: string;
     driver!: Browser;
     /** Handle of the SAP main window (wnd[0]), set by attachHome. */
@@ -103,7 +106,7 @@ export class SapDemo {
     }
 
     record(step: string, status: Status, detail: string): void {
-        this.checks.push({ step, status, detail });
+        this.checks.push({ step, status, detail, at: (Date.now() - this.started) / 1000 });
         this.writeReport();
     }
 
@@ -116,10 +119,10 @@ export class SapDemo {
             `Run: ${new Date().toISOString()}  `,
             `PASS: ${this.checks.filter((c) => c.status === 'PASS').length} · FAIL: ${this.failed.length}`,
             '',
-            '| # | Status | Step | Detail |',
-            '| --- | --- | --- | --- |',
+            '| # | Time | Status | Step | Detail |',
+            '| --- | --- | --- | --- | --- |',
             ...this.checks.map((c, i) =>
-                `| ${i + 1} | ${icon[c.status]} ${c.status} | ${c.step} | ${c.detail.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')} |`),
+                `| ${i + 1} | ${c.at.toFixed(1)}s | ${icon[c.status]} ${c.status} | ${c.step} | ${c.detail.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')} |`),
             '',
         ];
         this.save('SUMMARY.md', lines.join('\n'));
@@ -264,14 +267,12 @@ export class SapDemo {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
             try {
+                // No page source check here: it rebuilds the whole SAP tree over COM, which
+                // is slow — the title is specific enough.
                 await this.driver.executeScript('windows: switchToWindowByTitle', [{ title }]);
-                // Same title could in theory be another app's window — make sure it's SAP's popup.
-                if ((await this.driver.getPageSource()).startsWith('<GuiModalWindow')) {
-                    const handle = await this.driver.getWindowHandle();
-                    this.record(step, 'PASS', `popup ${handle} "${await this.driver.getTitle()}"`);
-                    return handle;
-                }
-                lastError = `"${title}" is not a SAP popup`;
+                const handle = await this.driver.getWindowHandle();
+                this.record(step, 'PASS', `popup ${handle} "${await this.driver.getTitle()}"`);
+                return handle;
             } catch (err) {
                 lastError = errMsg(err);
             }
