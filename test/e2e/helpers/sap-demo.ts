@@ -182,7 +182,7 @@ export class SapDemo {
      */
     async backHome(timeoutMs = 20_000): Promise<boolean> {
         const step = 'Back to SAP Easy Access';
-        if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
+        await this.closePopups();
         if (!(await this.typeInto(OKCODE, 'command field', '/n'))) {return false;}
         try {
             await (await this.driver.$(ENTER_BUTTON)).click();
@@ -220,18 +220,52 @@ export class SapDemo {
             await this.fail(step, `click ${selector}: ${errMsg(err)}`);
             return undefined;
         }
+        // SAP GUI opens helper windows too (e.g. an "Animated Gif" busy indicator), so
+        // only a new window whose page source is a SAP popup (GuiModalWindow) counts.
+        const skipped = new Map<string, string>();
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
-            const added = (await this.driver.getWindowHandles()).filter((h) => !before.has(h));
-            if (added.length > 0) {
-                await this.driver.switchToWindow(added[0]);
-                this.record(step, 'PASS', `new window ${added[0]} "${await this.driver.getTitle()}"`);
-                return added[0];
+            for (const h of (await this.driver.getWindowHandles()).filter((x) => !before.has(x) && !skipped.has(x))) {
+                if (await this.isSapPopup(h)) {
+                    const others = skipped.size ? `; skipped ${JSON.stringify(Object.fromEntries(skipped))}` : '';
+                    this.record(step, 'PASS', `popup ${h} "${await this.driver.getTitle()}"${others}`);
+                    return h;
+                }
+                skipped.set(h, await this.driver.getTitle().catch(() => '?'));
             }
             await delay(500);
         }
-        await this.fail(step, `no new window within ${timeoutMs / 1000}s; status bar "${await this.textOf(STATUS_BAR)}"`);
+        if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
+        await this.fail(step, `no SAP popup within ${timeoutMs / 1000}s; other new windows ${JSON.stringify(Object.fromEntries(skipped))}`);
         return undefined;
+    }
+
+    /** Switches to `handle` and tells whether it is a SAP popup (wnd[1], wnd[2], …). */
+    private async isSapPopup(handle: string): Promise<boolean> {
+        try {
+            await this.driver.switchToWindow(handle);
+            return (await this.driver.getPageSource()).startsWith('<GuiModalWindow');
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Closes every open SAP popup with its own Cancel button — while one is open, SAP
+     * locks the main window (its toolbar buttons disappear). Ends on the main window.
+     */
+    async closePopups(): Promise<void> {
+        for (const h of await this.driver.getWindowHandles()) {
+            if (h === this.mainWindow || !(await this.isSapPopup(h))) {continue;}
+            const title = await this.driver.getTitle().catch(() => '?');
+            try {
+                await (await this.driver.$("//GuiButton[starts-with(@Tooltip,'Cancel')]")).click();
+                this.record('Close leftover popup', 'INFO', `"${title}" via its Cancel button`);
+            } catch (err) {
+                this.record('Close leftover popup', 'FAIL', `"${title}": ${errMsg(err)}`);
+            }
+        }
+        if (this.mainWindow) {await this.driver.switchToWindow(this.mainWindow).catch(() => undefined);}
     }
 
     /**
