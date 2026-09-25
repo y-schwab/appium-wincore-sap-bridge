@@ -510,6 +510,9 @@ internal sealed class SapGuiClient : IDisposable
                 subType = component.GetString("SubType");
                 el.SetAttribute("SubType", subType);
             }
+            // Ticked state, so XPath can pick e.g. //GuiCheckBox[@Selected='True'].
+            if (type is "GuiCheckBox" or "GuiRadioButton")
+                el.SetAttribute("Selected", component.GetBool("Selected").ToString());
 
             // GuiVComponent screen geometry — absolute screen pixels. SAP has no cheap
             // "root rect" to offset against; the Actions layer can use absolute coords
@@ -686,6 +689,8 @@ internal sealed class SapGuiClient : IDisposable
             "text" or "value" => comp.GetString("Text"),
             "tooltip" => comp.GetString("Tooltip"),
             "changeable" or "enabled" => comp.GetBool("Changeable"),
+            // Typed, not the generic GetString below: IsSelected needs a bool back.
+            "selected" or "isselected" => comp.GetBool("Selected"),
             "iconname" => comp.GetString("IconName"),
             "screenleft" or "x" => comp.GetInt("ScreenLeft").ToString(),
             "screentop" or "y" => comp.GetInt("ScreenTop").ToString(),
