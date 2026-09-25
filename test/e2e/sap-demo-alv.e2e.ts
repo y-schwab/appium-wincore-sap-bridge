@@ -17,9 +17,11 @@ import { ENTER_BUTTON, SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
  *             (GuiShell SubType GridView, 2 GridRow, 17 GridCell each); restore
  *             "Standard SE16 list". XPath found no GridRow/GridCell yet: they had no
  *             element ids — the bridge now maps them (like tree nodes).
- *   Step 3    read client 001 from the grid: the GridRow whose MANDT cell is 001, then
- *             its cells by Column; record the column titles users see; select the row
- *             with windows: select.
+ *   Step 3 ✅ read client 001 from the grid: the GridRow whose MANDT cell is 001, then
+ *             its cells by Column; select the row with windows: select. Column Title
+ *             came back as the field name (MANDT) — SE16's "Field Name" setting.
+ *   Step 4    also pick "Field Label" in the popup, so column headers are what a user
+ *             reads; check the titles are labels; restore "Field Name" at the end.
  *
  * Ends with /n back to SAP Easy Access.
  *
@@ -37,27 +39,31 @@ const TABLE = 'T000';
 const CLIENT = '001';
 const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAER: 'EUR' };
 
-const ALV_GRID = 'ALV Grid Display';
-const STANDARD_LIST = 'Standard SE16 list';
+// Radio buttons in SE16's User Parameters popup, by their visible text: output format,
+// and whether column headers show the technical field name (MANDT) or its label.
+const DEMO_SETTINGS = ['ALV Grid Display', 'Field Label'];
+const ORIGINAL_SETTINGS = ['Standard SE16 list', 'Field Name'];
 
 const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16 ALV grid');
 
 /**
- * Sets SE16's output format the way a user does: SE16 → User Parameters → pick the
+ * Sets SE16's user parameters the way a user does: SE16 → User Parameters → pick each
  * radio button by its visible text → Transfer. Returns to the main window.
  */
-async function setOutputFormat(format: string): Promise<boolean> {
+async function setUserParameters(choices: string[]): Promise<boolean> {
     const driver = demo.driver;
     const popup = await demo.runTransaction('/nSE16', 'Open SE16', 'Data Browser')
         && await demo.openPopup(USER_PARAMETERS_BUTTON, 'User Parameters → popup');
     if (!popup) {return false;}
     try {
-        const radio = await driver.$(`//GuiRadioButton[@Text='${format}']`);
-        await radio.click();
-        if (!(await radio.isSelected())) {
-            return demo.fail(`Pick "${format}"`, 'radio button not selected after click()');
+        for (const choice of choices) {
+            const radio = await driver.$(`//GuiRadioButton[@Text='${choice}']`);
+            await radio.click();
+            if (!(await radio.isSelected())) {
+                return demo.fail(`Pick "${choice}"`, 'radio button not selected after click()');
+            }
+            demo.record(`Pick "${choice}"`, 'PASS', shortId(await radio.elementId));
         }
-        demo.record(`Pick "${format}"`, 'PASS', shortId(await radio.elementId));
 
         await (await driver.$(TRANSFER_BUTTON)).click();
         const closed = await driver.waitUntil(
@@ -68,7 +74,7 @@ async function setOutputFormat(format: string): Promise<boolean> {
         demo.record('Transfer', 'PASS', `popup closed; status bar "${await demo.textOf('~wnd[0]/sbar')}"`);
         return true;
     } catch (err) {
-        return demo.fail(`Set output "${format}"`, errMsg(err));
+        return demo.fail(`Set user parameters ${choices.join(' + ')}`, errMsg(err));
     }
 }
 
@@ -92,7 +98,7 @@ describe('sap demo: SE16 ALV grid', () => {
 
         try {
             // 1. Switch SE16 to ALV grid output (lands back on SE16's initial screen).
-            if (await setOutputFormat(ALV_GRID)) {
+            if (await setUserParameters(DEMO_SETTINGS)) {
                 // 2. T000 → selection screen → Execute → grid.
                 const executed = await demo.typeInto(TABLE_NAME_FIELD, 'Table Name', TABLE)
                     && await demo.pressAndWait(ENTER_BUTTON, `Table ${TABLE} → selection screen`, 'Selection Screen');
@@ -106,7 +112,6 @@ describe('sap demo: SE16 ALV grid', () => {
                     } else {
                         await demo.fail('Grid after Execute', `no ${GRID} within 15s`);
                     }
-                    await demo.captureScreen('Result', '01-page-source-grid.xml');
 
                     // 3. Read client 001 out of the grid: the row whose MANDT cell is 001,
                     //    then that row's cells by column.
@@ -117,11 +122,11 @@ describe('sap demo: SE16 ALV grid', () => {
                     } else {
                         demo.record(`Find row ${CLIENT}`, 'PASS', await rowEl.elementId);
                         const values: Record<string, string> = {};
-                        const titles: string[] = [];
+                        const titles: Record<string, string> = {};
                         for (const col of Object.keys(EXPECTED_CLIENT)) {
                             const cell = await driver.$(`${row}/GridCell[@Column='${col}']`);
                             values[col] = await cell.getText();
-                            titles.push(`${col} = "${await cell.getAttribute('Title')}"`);
+                            titles[col] = (await cell.getAttribute('Title')) ?? '';
                         }
                         const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => values[k] !== v);
                         if (wrong.length === 0) {
@@ -130,7 +135,14 @@ describe('sap demo: SE16 ALV grid', () => {
                             await demo.fail(`Client ${CLIENT} from grid`,
                                 wrong.map(([k, v]) => `${k}: expected "${v}", read "${values[k]}"`).join('; '));
                         }
-                        demo.record('Column titles', 'INFO', titles.join('\n'));
+                        // With "Field Label" the headers are what a user reads, not field names.
+                        const labelled = Object.entries(titles).every(([col, title]) => title && title !== col);
+                        const titleList = Object.entries(titles).map(([col, title]) => `${col} = "${title}"`).join('\n');
+                        if (labelled) {
+                            demo.record('Column titles are labels', 'PASS', titleList);
+                        } else {
+                            await demo.fail('Column titles are labels', titleList);
+                        }
 
                         // 4. Select the row, like clicking its row marker.
                         await driver.executeScript('windows: select', [{ elementId: await rowEl.elementId }]);
@@ -148,7 +160,7 @@ describe('sap demo: SE16 ALV grid', () => {
         } finally {
             // 3. Always put the setting back — the SE16 demo expects the classic list.
             await demo.closePopups();
-            await setOutputFormat(STANDARD_LIST);
+            await setUserParameters(ORIGINAL_SETTINGS);
         }
 
         await demo.backHome();
