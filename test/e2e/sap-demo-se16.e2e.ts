@@ -16,12 +16,15 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
  *   4. Read client 001: SE16 shows a classic list here, not an ALV grid — every value is
  *      a GuiLabel whose Id is its position, lbl[column,row]. Find the header row, find
  *      the row whose MANDT is 001, read that row into a record and check it.
- *   5. /n back to SAP Easy Access, so the test can be rerun as is.
+ *   5. (in progress) tick the row's checkbox, Display (F7) → the entry's detail screen.
+ *      Captured as 01-page-source-detail.xml + input fields in the summary, so the
+ *      next step can read it from what SAP actually shows.
+ *   6. /n back to SAP Easy Access, so the test can be rerun as is.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo/: SUMMARY.md, plus the page source of the screen
- * a step failed on (failed-<step>.xml).
+ * Output in test-output/sap-demo/: SUMMARY.md, the screen being explored, plus the
+ * page source of the screen a step failed on (failed-<step>.xml).
  *
  * Env:
  *   SAP_WINDOW_TITLE  partial title of the logged-in window (default: "SAP Easy")
@@ -36,6 +39,7 @@ const TITLE_BAR = '~wnd[0]/titl';
 const STATUS_BAR = '~wnd[0]/sbar';
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // SE16 initial screen
 const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)", selection screen
+const DISPLAY_BUTTON = '~wnd[0]/tbar[1]/btn[7]'; // "Display (F7)", result list
 
 const TABLE = 'T000'; // SAP clients
 const CLIENT = '001';
@@ -150,12 +154,38 @@ function listPos(id: string): { col: number; row: number } | undefined {
     return m ? { col: Number(m[1]), row: Number(m[2]) } : undefined;
 }
 
+/** Discovery: page source of a screen not scripted yet, plus its fields and buttons in the summary. */
+async function captureScreen(driver: Browser, label: string, file: string): Promise<void> {
+    save(file, await driver.getPageSource());
+    const strip = (id: string) => id.replace(/^sap:\/app\/con\[\d+\]\/ses\[\d+\]\//, '');
+    const rows: string[] = [];
+    for (const e of await driver.findElements('xpath',
+        '//GuiUserArea//*[self::GuiTextField or self::GuiCTextField or self::GuiCheckBox or self::GuiComboBox]')) {
+        const el = await driver.$(e);
+        const id = strip(Object.values(e)[0] as string);
+        const value = id.includes('/chk') ? `selected=${await el.isSelected()}` : `"${await el.getText()}"`;
+        rows.push(`${id} = ${value}`);
+    }
+    const buttons: string[] = [];
+    for (const e of await driver.findElements('xpath', "//GuiToolbar[@Name='tbar[1]']//GuiButton")) {
+        buttons.push(`${strip(Object.values(e)[0] as string)} "${await (await driver.$(e)).getAttribute('Tooltip')}"`);
+    }
+    record(`${label} screen`, 'INFO', [
+        `title "${await textOf(driver, TITLE_BAR)}", status bar "${await textOf(driver, STATUS_BAR)}"`,
+        `window ${await driver.getWindowHandle()}, all windows ${JSON.stringify(await driver.getWindowHandles())}`,
+        `page source in ${file}`,
+        '— fields —', ...(rows.length ? rows : ['(none)']),
+        '— tbar[1] —', ...(buttons.length ? buttons : ['(none)']),
+    ].join('\n'));
+}
+
 /**
  * Reads one entry of a classic SAP list (SE16 without ALV) by locators only:
  * header row = the row of the label reading `keyColumn`; entry row = the row whose
  * label in that column reads `keyValue`; then each header's column in the entry row.
+ * Returns the entry and its list row.
  */
-async function readListEntry(driver: Browser, keyColumn: string, keyValue: string): Promise<Record<string, string>> {
+async function readListEntry(driver: Browser, keyColumn: string, keyValue: string): Promise<{ entry: Record<string, string>; row: number }> {
     const header = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyColumn}']`);
     if (!(await header.isExisting())) {throw new Error(`no column header "${keyColumn}"`);}
     const headerPos = listPos(await header.elementId);
@@ -181,7 +211,7 @@ async function readListEntry(driver: Browser, keyColumn: string, keyValue: strin
         const el = await driver.$(`~wnd[0]/usr/lbl[${c.col},${row}]`);
         entry[c.name] = (await el.isExisting()) ? (await el.getText()).trim() : '';
     }
-    return entry;
+    return { entry, row };
 }
 
 describe('sap demo: SE16 → T000', () => {
@@ -224,12 +254,14 @@ describe('sap demo: SE16 → T000', () => {
             && await pressAndWait(driver, EXECUTE_BUTTON, 'Execute → result list');
 
         // 4. Read client 001 out of the list and check it.
+        let clientRow: number | undefined;
         if (onResult) {
             try {
-                const entry = await readListEntry(driver, 'MANDT', CLIENT);
+                const { entry, row } = await readListEntry(driver, 'MANDT', CLIENT);
                 const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => entry[k] !== v);
                 if (wrong.length === 0) {
-                    record(`Client ${CLIENT}`, 'PASS', JSON.stringify(entry));
+                    record(`Client ${CLIENT}`, 'PASS', `row ${row}: ${JSON.stringify(entry)}`);
+                    clientRow = row;
                 } else {
                     await fail(driver, `Client ${CLIENT}`,
                         wrong.map(([k, v]) => `${k}: expected "${v}", read "${entry[k]}"`).join('; '));
@@ -239,7 +271,32 @@ describe('sap demo: SE16 → T000', () => {
             }
         }
 
-        // 5. Back home, so the next run starts from SAP Easy Access again.
+        // 5. Tick the row's checkbox (a plain click, like a user) and open its detail view.
+        if (clientRow !== undefined) {
+            const checkbox = `~wnd[0]/usr/chk[1,${clientRow}]`;
+            let ticked = false;
+            try {
+                const box = await driver.$(checkbox);
+                await box.click();
+                ticked = await box.isSelected();
+                if (ticked) {
+                    record(`Tick row ${CLIENT}`, 'PASS', `${checkbox} selected`);
+                } else {
+                    await fail(driver, `Tick row ${CLIENT}`, `${checkbox} still not selected after click()`);
+                }
+            } catch (err) {
+                await fail(driver, `Tick row ${CLIENT}`, `${checkbox}: ${errMsg(err)}`);
+            }
+            if (ticked && await pressAndWait(driver, DISPLAY_BUTTON, `Display → client ${CLIENT} detail`)) {
+                try {
+                    await captureScreen(driver, 'Detail', '01-page-source-detail.xml');
+                } catch (err) {
+                    record('Detail screen', 'FAIL', errMsg(err));
+                }
+            }
+        }
+
+        // 6. Back home, so the next run starts from SAP Easy Access again.
         await runTransaction(driver, '/n', 'Back to SAP Easy Access');
 
         expect(failed()).toEqual([]);
