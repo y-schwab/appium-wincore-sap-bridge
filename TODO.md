@@ -16,8 +16,8 @@ cells, and dropdowns.
   `@Column='MANDT'`.~~ Kept `@Column`: titles change with logon language and
   column width. `@Title` works in XPath too.
 - [x] Slim the ALV demo down to the verified flow.
-- [ ] Run all four demos (SE16, SU3, ALV, dropdown) in one go to check they
-  don't interfere with each other.
+- [x] Run all four demos (SE16, SU3, ALV, dropdown) in one go to check they
+  don't interfere with each other (46 PASS, ~51 s).
 
 ## New demo test
 
