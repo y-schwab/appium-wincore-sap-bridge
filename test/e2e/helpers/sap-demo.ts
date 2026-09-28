@@ -276,17 +276,20 @@ export class SapDemo {
     }
 
     /**
-     * Clicks a button that opens a popup (wnd[1] — its own window) and switches straight
+     * Clicks (or, with `how: 'invoke'`, invokes) what opens a popup (wnd[1] — its own window) and switches straight
      * to it by its title (windows: switchToWindowByTitle), retrying until it appears — no
      * trying other windows on the way. Returns the popup's handle, or undefined (recorded
      * as FAIL) if it didn't appear.
      */
-    async openPopup(selector: string, step: string, title: string, timeoutMs = 10_000): Promise<string | undefined> {
+    async openPopup(selector: string, step: string, title: string, timeoutMs = 10_000,
+        how: 'click' | 'invoke' = 'click'): Promise<string | undefined> {
         try {
             await this.pause();
-            await (await this.driver.$(selector)).click();
+            const el = await this.driver.$(selector);
+            // invoke: for what has no screen position to click, e.g. a menu item.
+            if (how === 'invoke') {await this.driver.executeScript('windows: invoke', [{ elementId: el.elementId }]);} else {await el.click();}
         } catch (err) {
-            await this.fail(step, `click ${selector}: ${errMsg(err)}`);
+            await this.fail(step, `${how} ${selector}: ${errMsg(err)}`);
             return undefined;
         }
         let lastError = '';

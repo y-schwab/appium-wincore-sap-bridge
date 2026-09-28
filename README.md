@@ -129,6 +129,18 @@ await (await driver.$(`${row}/*[@Name='DD03D-DATATYPE']`)).getText();   // 'CLNT
 
 `TableRow` itself is not an element; act on its cells.
 
+### Menus
+
+The whole menu bar is in page source without opening anything: `GuiMenubar` →
+`GuiMenu` items, nested per submenu. Find items by their text (their index differs per
+screen). Menu items have no screen geometry, so `click()` is refused; select one with
+`windows: invoke`:
+
+```ts
+const status = await driver.$("//GuiMenubar/GuiMenu[@Text='System']/GuiMenu[@Text='Status...']");
+await driver.executeScript('windows: invoke', [{ elementId: status.elementId }]);
+```
+
 ### Dropdowns
 
 A `GuiComboBox` carries the selected entry's `Key` next to its visible `Text`, and lists

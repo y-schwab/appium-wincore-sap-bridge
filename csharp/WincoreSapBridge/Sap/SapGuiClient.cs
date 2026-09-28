@@ -1012,6 +1012,12 @@ internal sealed class SapGuiClient : IDisposable
                 "with the mouse. Use windows: select (select the row / make the cell current), windows: invoke " +
                 "(double-click the cell) or setValue (editable cells) instead.");
         var comp = Resolve(elementId);
+        // Menu items report no geometry (-1) even while their menu is open; a mouse
+        // click would land near the screen's corner instead.
+        if (comp.GetString("Type") is "GuiMenu" or "GuiContextMenu")
+            throw new NotSupportedException(
+                "SAP menu items have no screen geometry in the scripting API, so they cannot be clicked with " +
+                "the mouse. Use windows: invoke instead — it selects the item, like clicking it.");
         return new
         {
             x = comp.GetInt("ScreenLeft"),
