@@ -38,9 +38,11 @@ Display-only, built step by step like the others.
 
 - [x] **Dropdown `setValue`**: accept the visible text ("English"), not
   only SAP's internal key (`EN`). Verified on A4H (`gui-combo-box.e2e.ts`).
-- [ ] **Scrolling**: grids and table controls only expose the rows on
-  screen. Reach the rest by scrolling or by exposing every row. Test case:
-  SE11 → T000 → Fields shows 15 of 17 fields (`RowCount` 31, `VisibleRowCount` 15).
+- [x] **Scrolling**: decided to accept the limitation — page source lists
+  only the rows on screen (table controls and classic lists don't have the
+  others on the client at all). Tests scroll like a user, with the mouse wheel
+  (`windows: scroll`), and find again. Needs the SAP window in focus. To
+  confirm on A4H: `gui-table-control.e2e.ts` scrolls to LOGSYS.
 - [ ] **Classic list structure**: turn the labels positioned by
   `lbl[col,row]` into rows and columns (`ListRow` / `@Column`), using the
   ABAP heading color to find the header row. Parked until users ask for it.

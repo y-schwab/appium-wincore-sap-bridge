@@ -14,9 +14,11 @@ import { SapDemo, errMsg } from './helpers/sap-demo.js';
  *      bridge groups into TableRow elements with column Titles. Read the MANDT row by
  *      column Name: data type CLNT, length 3, "Client", key ticked; and each cell's
  *      column Title ("Data Type", "Length", "Short Description").
- *   4. /n back to SAP Easy Access. Changes nothing.
- *
- * Only the rows on screen are in the tree: 15 of T000's 17 fields.
+ *   4. Scroll: only the rows on screen are in the tree (15 of T000's 17 fields) —
+ *      the rest don't exist on the client until the table scrolls. LOGSYS, the last
+ *      field, isn't there; turn the mouse wheel over the table (windows: scroll, one
+ *      notch at a time) until it is, then read its data type (CHAR).
+ *   5. /n back to SAP Easy Access. Changes nothing.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
@@ -33,6 +35,12 @@ const FIELDS_TAB = "//GuiTab[@Text='Fields']";
 const PACKAGE = "//GuiCTextField[@Name='RSDXX-DEVCLASS']"; // Attributes tab only
 const LANGUAGE = "//GuiCTextField[@Name='RSDXX-MALANGU']";
 const MANDT_ROW = `//GuiTableControl/TableRow[*[@Name='DD03D-FIELDNAME' and @Text='MANDT']]`;
+const FIELD_LIST = '//GuiTableControl';
+// T000's last field — below the 15 rows on screen.
+const LOGSYS_FIELD = "//GuiTableControl/TableRow/*[@Name='DD03D-FIELDNAME' and @Text='LOGSYS']";
+const LOGSYS_TYPE = "//GuiTableControl/TableRow[*[@Name='DD03D-FIELDNAME' and @Text='LOGSYS']]/*[@Name='DD03D-DATATYPE']";
+const WHEEL_NOTCH = 120; // Win32 WHEEL_DELTA; windows: scroll deltaY > 0 scrolls down
+const MAX_NOTCHES = 10;
 
 /** MANDT in T000's field list, by column Name: value and column title. */
 const EXPECTED_MANDT: Record<string, { text: string; title: string }> = {
@@ -99,6 +107,30 @@ describe('GuiTableControl: SE11 tabs and field list', () => {
                 const titlesOk = Object.entries(EXPECTED_MANDT).every(([k, v]) => titles[k] === v.title);
                 const titleDetail = Object.entries(titles).map(([k, t]) => `${k} = "${t}"`).join('\n');
                 if (titlesOk) {demo.record('Column titles', 'PASS', titleDetail);} else {await demo.fail('Column titles', titleDetail);}
+
+                // 3. Scroll: LOGSYS is off screen, so it isn't in the tree until the table
+                //    scrolls. Mouse wheel over the table, one notch at a time.
+                if (await demo.exists(LOGSYS_FIELD)) {
+                    await demo.fail('LOGSYS off screen', 'LOGSYS already listed before scrolling');
+                } else {
+                    demo.record('LOGSYS off screen', 'PASS', 'not in the tree before scrolling');
+                    const table = await driver.$(FIELD_LIST);
+                    let notches = 0;
+                    let found = false;
+                    while (!found && notches < MAX_NOTCHES) {
+                        await demo.pause();
+                        await driver.executeScript('windows: scroll', [{ elementId: table.elementId, deltaY: WHEEL_NOTCH }]);
+                        notches++;
+                        found = await demo.exists(LOGSYS_FIELD);
+                    }
+                    if (!found) {
+                        await demo.fail('Scroll to LOGSYS', `not listed after ${notches} wheel notch(es)`);
+                    } else {
+                        const type = (await (await driver.$(LOGSYS_TYPE)).getText()).trim();
+                        const detail = `after ${notches} wheel notch(es): data type "${type}"`;
+                        if (type === 'CHAR') {demo.record('Scroll to LOGSYS', 'PASS', detail);} else {await demo.fail('Scroll to LOGSYS', detail);}
+                    }
+                }
             }
         } catch (err) {
             await demo.fail('SE11 flow', errMsg(err));

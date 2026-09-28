@@ -129,6 +129,13 @@ await (await driver.$(`${row}/*[@Name='DD03D-DATATYPE']`)).getText();   // 'CLNT
 
 `TableRow` itself is not an element; act on its cells.
 
+Rows off screen are not listed: a table control only has the visible rows on the client.
+Scroll like a user, with the mouse wheel over the table, then find again:
+
+```ts
+await driver.executeScript('windows: scroll', [{ elementId: table.elementId, deltaY: 120 }]); // one notch down
+```
+
 ### Menus
 
 The whole menu bar is in page source without opening anything: `GuiMenubar` →
