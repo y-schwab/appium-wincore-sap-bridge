@@ -9,7 +9,8 @@ import { SapDemo, delay, errMsg, shortId } from './helpers/sap-demo.js';
  *   1. /nSU3 → "Maintain User Profile", switch to the Defaults tab.
  *   2. Read every dropdown on it from the page source: selected Key and Text, and its
  *      entries (ComboBoxEntry Key / Value). Pick one with an entry other than the
- *      selected one (or SAP_DROPDOWN_ID, e.g. wnd[0]/usr/…/cmbSUID_ST_NODE_DEFAULTS-DATFM).
+ *      selected one, preferring a non-blank key and texts with letters — Date Format
+ *      (or SAP_DROPDOWN_ID, e.g. wnd[0]/usr/…/cmbSUID_ST_NODE_DEFAULTS-DCPFM).
  *   3. windows: setValue with the other entry's visible text → Key and Text follow.
  *   4. windows: setValue with the original key (the old way still works).
  *   5. The other entry's text in another case (case-insensitive match).
@@ -105,7 +106,8 @@ describe('sap demo: dropdown', () => {
                 const el = await driver.$(selector);
                 await driver.executeScript('windows: setValue', [{ elementId: el.elementId, value }]);
                 const now = await readBack(selector);
-                const ok = now.key.trim() === expected.key.trim() && now.text.trim() === expected.value.trim();
+                // Text compared untrimmed: the bridge strips SAP's padding (~250 blanks).
+                const ok = now.key.trim() === expected.key.trim() && now.text === expected.value.trim();
                 const detail = `setValue ${JSON.stringify(value)} → Key '${now.key}', Text ${JSON.stringify(now.text)}`
                     + (ok ? '' : `; expected Key '${expected.key}', Text ${JSON.stringify(expected.value)}`);
                 if (ok) {demo.record(step, 'PASS', detail);} else {await demo.fail(step, detail);}
@@ -148,9 +150,13 @@ describe('sap demo: dropdown', () => {
                 }
 
                 const wanted = process.env.SAP_DROPDOWN_ID;
+                // Prefer a dropdown that exercises everything: a non-blank key to restore
+                // by, and a text with letters for the case-insensitive step (Date Format,
+                // not Decimal Notation).
+                const usable = found.filter((d) => d.changeable && otherEntry(d));
                 const pick = wanted
                     ? found.find((d) => shortId(d.id) === shortId(wanted) || d.id.endsWith(wanted))
-                    : found.find((d) => d.changeable && otherEntry(d));
+                    : usable.find((d) => d.key.trim() !== '' && /\p{L}/u.test(otherEntry(d)!.value)) ?? usable[0];
                 const target = pick && otherEntry(pick);
                 if (found.length > 0 && (!pick || !target)) {
                     await demo.fail('Pick a dropdown', wanted

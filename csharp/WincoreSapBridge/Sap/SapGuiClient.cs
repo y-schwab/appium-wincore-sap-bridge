@@ -539,7 +539,7 @@ internal sealed class SapGuiClient : IDisposable
             el.SetAttribute("Id", sapId);
             el.SetAttribute("Type", type);
             el.SetAttribute("Name", component.GetString("Name"));
-            var text = Sanitize(component.GetString("Text"));
+            var text = Sanitize(TextOf(component, type));
             el.SetAttribute("Text", text);
             el.SetAttribute("Tooltip", Sanitize(component.GetString("Tooltip")));
             el.SetAttribute("Changeable", component.GetBool("Changeable").ToString());
@@ -820,7 +820,7 @@ internal sealed class SapGuiClient : IDisposable
             "id" => comp.GetString("Id"),
             "type" => comp.GetString("Type"),
             "name" => comp.GetString("Name"),
-            "text" or "value" => comp.GetString("Text"),
+            "text" or "value" => TextOf(comp),
             "tooltip" => comp.GetString("Tooltip"),
             "changeable" or "enabled" => comp.GetBool("Changeable"),
             // Typed, not the generic GetString below: IsSelected needs a bool back.
@@ -881,7 +881,17 @@ internal sealed class SapGuiClient : IDisposable
         if (ResolveNode(elementId) is var (tree, key)) return tree.GetString("GetNodeTextByKey", key);
         if (ResolveGridItem(elementId) is var (grid, row, column))
             return column == null ? GridRowText(grid, row) : grid.GetString("GetCellValue", row, column);
-        return Resolve(elementId).GetString("Text");
+        return TextOf(Resolve(elementId));
+    }
+
+    /// <summary>
+    /// A component's <c>Text</c>. A dropdown's comes padded with trailing blanks to the
+    /// width of its list (~250 characters); trimmed, it is what the user sees.
+    /// </summary>
+    private static string TextOf(Disp comp, string? type = null)
+    {
+        var text = comp.GetString("Text");
+        return (type ?? comp.GetString("Type")) == "GuiComboBox" ? text.TrimEnd() : text;
     }
 
     public string GetTagName(string elementId)
