@@ -312,9 +312,9 @@ export class SapDemo {
     /** True while a SAP popup is open: SAP then locks the main window (Changeable=False). */
     private async popupOpen(): Promise<boolean> {
         try {
-            const main = await this.driver.$('/GuiMainWindow');
-            return (await main.isExisting())
-                && String(await main.getAttribute('Changeable')).toLowerCase() === 'false';
+            // By SAP id (one lookup), not XPath (which rebuilds the whole tree).
+            const main = await this.driver.$('~wnd[0]');
+            return String(await main.getAttribute('Changeable')).toLowerCase() === 'false';
         } catch {
             return false;
         }

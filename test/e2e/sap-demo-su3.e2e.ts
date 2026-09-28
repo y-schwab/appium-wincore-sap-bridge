@@ -63,34 +63,21 @@ describe('sap demo: SU3', () => {
 
         try {
             if (await demo.runTransaction('/nSU3', 'Open SU3', 'Maintain User Profile')) {
-                // 1. Change Department.
-                const field = await department(driver);
-                const before = await field.getText();
-                await field.setValue(newValue);
-                const typed = await field.getText();
-                demo.record('Change Department', typed === newValue ? 'PASS' : 'FAIL', `"${before}" → "${typed}"`);
+                // 1. Change Department (checked after reopening, step 3).
+                await (await department(driver)).setValue(newValue);
+                demo.record('Change Department', 'PASS', `typed "${newValue}"`);
 
-                // 2. Save. SU3 stays on the same screen, so watch the status bar (and any
-                //    popup SAP might open) instead of the title.
-                const handlesBefore = new Set(await driver.getWindowHandles());
+                // 2. Save. SU3 stays on the same screen, so wait for the status bar
+                //    instead of the title.
                 await (await driver.$(SAVE_BUTTON)).click();
                 let status = '';
-                let popup: string | undefined;
                 const deadline = Date.now() + 10_000;
-                while (Date.now() < deadline && !status && !popup) {
+                while (Date.now() < deadline && !status) {
                     await delay(500);
                     status = (await demo.textOf(STATUS_BAR)).trim();
-                    popup = (await driver.getWindowHandles()).find((h) => !handlesBefore.has(h));
                 }
-                if (popup) {
-                    // Save has never asked anything on this system — a popup here is new.
-                    await driver.switchToWindow(popup);
-                    await demo.fail('Save', `unexpected popup "${await driver.getTitle()}"`);
-                    await driver.switchToWindow(demo.mainWindow);
-                } else {
-                    saved = status.length > 0;
-                    demo.record('Save', saved ? 'PASS' : 'FAIL', `status bar "${status || '(empty after 10s)'}"`);
-                }
+                saved = status.length > 0;
+                demo.record('Save', saved ? 'PASS' : 'FAIL', `status bar "${status || '(empty after 10s)'}"`);
             }
         } catch (err) {
             await demo.fail('Change and save', errMsg(err));

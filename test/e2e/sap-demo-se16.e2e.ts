@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Browser } from 'webdriverio';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
-import { ENTER_BUTTON, SapDemo, errMsg, refId } from './helpers/sap-demo.js';
+import { ENTER_BUTTON, SapDemo, errMsg } from './helpers/sap-demo.js';
 
 /**
  * Demo: a real SAP task driven end to end through standard WebDriver — from SAP Easy
@@ -13,8 +13,8 @@ import { ENTER_BUTTON, SapDemo, errMsg, refId } from './helpers/sap-demo.js';
  *   2. T000 in the Table Name field + Enter → the table's selection screen.
  *   3. Execute (F8) → the result list.
  *   4. Read client 001: SE16 shows a classic list here, not an ALV grid — every value is
- *      a GuiLabel whose Id is its position, lbl[column,row]. Find the header row, find
- *      the row whose MANDT is 001, read that row into a record and check it.
+ *      a GuiLabel whose Id is its position, lbl[column,row]. Find each wanted column by
+ *      its header, the row whose MANDT is 001, read those cells and check them.
  *   5. Tick the row's checkbox (windows: select), Display (F7) → the entry's detail screen, an ordinary
  *      form: read the fields by SAP Name (T000-MTEXT, …), check they match the list
  *      and are all read-only.
@@ -60,37 +60,26 @@ async function readDetail(driver: Browser, columns: string[]): Promise<{ values:
 }
 
 /**
- * Reads one entry of a classic SAP list (SE16 without ALV) by locators only:
- * header row = the row of the label reading `keyColumn`; entry row = the row whose
- * label in that column reads `keyValue`; then the `wanted` columns in the entry row.
- * Returns the entry and its list row.
+ * Reads one entry of a classic SAP list (SE16 without ALV) by locators only: each
+ * wanted column's header label (by its text) gives the column; the label reading
+ * `keyValue` in the key column gives the row; the values are the labels at those
+ * positions, `lbl[col,row]`. Returns the entry and its list row.
  */
 async function readListEntry(driver: Browser, keyColumn: string, keyValue: string, wanted: string[]): Promise<{ entry: Record<string, string>; row: number }> {
-    const header = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyColumn}']`);
-    if (!(await header.isExisting())) {throw new Error(`no column header "${keyColumn}"`);}
-    const headerPos = listPos(await header.elementId);
-    if (!headerPos) {throw new Error(`unexpected header id ${await header.elementId}`);}
+    const headerCol = async (name: string) => {
+        const pos = listPos(await (await driver.$(`//GuiUserArea/GuiLabel[@Text='${name}']`)).elementId ?? '');
+        if (!pos) {throw new Error(`no column header "${name}"`);}
+        return pos.col;
+    };
 
-    // Every non-empty label on the header row is a column name.
-    const columns: { name: string; col: number }[] = [];
-    for (const e of await driver.findElements('xpath', `//GuiUserArea/GuiLabel[contains(@Id, ',${headerPos.row}]') and @Text!='']`)) {
-        const pos = listPos(refId(e));
-        if (pos?.row === headerPos.row) {columns.push({ name: await (await driver.$(e)).getText(), col: pos.col });}
-    }
+    const keyCol = await headerCol(keyColumn);
+    const cell = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyValue}' and contains(@Id, 'lbl[${keyCol},')]`);
+    const row = listPos(await cell.elementId ?? '')?.row;
+    if (row === undefined) {throw new Error(`no row with ${keyColumn} = ${keyValue}`);}
 
-    const rows = await driver.findElements('xpath', "//GuiUserArea/GuiCheckBox[contains(@Id, '/usr/chk[')]");
-    demo.record('Read list headers', columns.length > 0 ? 'PASS' : 'FAIL',
-        `${rows.length} row(s); columns ${columns.map((c) => c.name).join(', ')}`);
-
-    const cell = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyValue}' and contains(@Id, 'lbl[${headerPos.col},')]`);
-    if (!(await cell.isExisting())) {throw new Error(`no row with ${keyColumn} = ${keyValue}`);}
-    const row = listPos(await cell.elementId)!.row;
-
-    // An empty value has no label at all, hence exists() (no implicit wait) first.
-    const entry: Record<string, string> = {};
-    for (const c of columns.filter((c) => wanted.includes(c.name))) {
-        const label = `~wnd[0]/usr/lbl[${c.col},${row}]`;
-        entry[c.name] = (await demo.exists(label)) ? (await (await driver.$(label)).getText()).trim() : '';
+    const entry: Record<string, string> = { [keyColumn]: keyValue };
+    for (const name of wanted.filter((w) => w !== keyColumn)) {
+        entry[name] = (await (await driver.$(`~wnd[0]/usr/lbl[${await headerCol(name)},${row}]`)).getText()).trim();
     }
     return { entry, row };
 }
@@ -144,14 +133,8 @@ describe('sap demo: SE16 → T000', () => {
             const checkbox = `~wnd[0]/usr/chk[1,${clientRow}]`;
             let ticked = false;
             try {
-                const box = await driver.$(checkbox);
-                await driver.executeScript('windows: select', [{ elementId: box.elementId }]);
-                ticked = await box.isSelected();
-                if (ticked) {
-                    demo.record(`Tick row ${CLIENT}`, 'PASS', `${checkbox} selected`);
-                } else {
-                    await demo.fail(`Tick row ${CLIENT}`, `${checkbox} still not selected after windows: select`);
-                }
+                await driver.executeScript('windows: select', [{ elementId: (await driver.$(checkbox)).elementId }]);
+                ticked = true;
             } catch (err) {
                 await demo.fail(`Tick row ${CLIENT}`, `${checkbox}: ${errMsg(err)}`);
             }

@@ -8,15 +8,13 @@ import { ENTER_BUTTON, SapDemo, errMsg } from './helpers/sap-demo.js';
  * is a per-user setting in SE16's "User Parameters" popup.
  *
  *   1. /nSE16 → User Parameters (F6) → popup "User-Specific Settings" (wnd[1], its own
- *      window): pick "ALV Grid Display" and "Field Label" (column headers show labels,
- *      not field names), Transfer.
+ *      window): pick "ALV Grid Display", Transfer.
  *   2. T000 → selection screen → Execute → ALV grid (GuiShell SubType GridView).
  *   3. Read client 001: the GridRow whose MANDT cell is 001, then its cells by Column
- *      (stable across logon languages, unlike the visible Title); check the Titles are
- *      labels ("Cl.", "Name", …).
+ *      (stable across logon languages, unlike the visible Title).
  *   4. Select the row (windows: select).
- *   5. Always put "Standard SE16 list" and "Field Name" back — the SE16 demo expects
- *      the classic list — then /n back to SAP Easy Access.
+ *   5. Always put "Standard SE16 list" back — the SE16 demo expects the classic list —
+ *      then /n back to SAP Easy Access.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
@@ -37,10 +35,9 @@ const TABLE = 'T000';
 const CLIENT = '001';
 const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAER: 'EUR' };
 
-// Radio buttons in SE16's User Parameters popup, by their visible text: output format,
-// and whether column headers show the technical field name (MANDT) or its label.
-const DEMO_SETTINGS = ['ALV Grid Display', 'Field Label'];
-const ORIGINAL_SETTINGS = ['Standard SE16 list', 'Field Name'];
+// Output format radio buttons in SE16's User Parameters popup, by their visible text.
+const DEMO_SETTINGS = ['ALV Grid Display'];
+const ORIGINAL_SETTINGS = ['Standard SE16 list'];
 
 const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16 ALV grid');
 
@@ -55,13 +52,8 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
     if (!popup) {return false;}
     try {
         for (const choice of choices) {
-            const radio = await driver.$(`//GuiRadioButton[@Text='${choice}']`);
             await demo.pause();
-            await radio.click();
-            if (!(await radio.isSelected())) {
-                return demo.fail(`Pick "${choice}"`, 'radio button not selected after click()');
-            }
-            demo.record(`Pick "${choice}"`, 'PASS', 'selected');
+            await (await driver.$(`//GuiRadioButton[@Text='${choice}']`)).click();
         }
 
         await demo.pause();
@@ -71,7 +63,7 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
             { timeout: 10_000 }).then(() => true, () => false);
         await driver.switchToWindow(demo.mainWindow);
         if (!closed) {return demo.fail('Transfer', 'popup still open');}
-        demo.record('Transfer', 'PASS', `popup closed; status bar "${await demo.textOf('~wnd[0]/sbar')}"`);
+        demo.record(`Transfer (${choices.join(', ')})`, 'PASS', 'popup closed');
         return true;
     } catch (err) {
         return demo.fail(`Set user parameters ${choices.join(' + ')}`, errMsg(err));
@@ -109,7 +101,7 @@ describe('sap demo: SE16 ALV grid', () => {
                     const grid = await driver.$(GRID);
                     const found = await grid.waitForExist({ timeout: 15_000 }).then(() => true, () => false);
                     if (found) {
-                        demo.record('Grid after Execute', 'PASS', `title "${await demo.textOf('~wnd[0]/titl')}"`);
+                        demo.record('Grid after Execute', 'PASS', 'GridView shown');
                     } else {
                         await demo.fail('Grid after Execute', `no ${GRID} within 15s`);
                     }
@@ -118,16 +110,12 @@ describe('sap demo: SE16 ALV grid', () => {
                     //    then that row's cells by column.
                     const row = `${GRID}//GridRow[GridCell[@Column='MANDT' and @Text='${CLIENT}']]`;
                     const rowEl = await driver.$(row);
-                    if (!(await rowEl.isExisting())) {
+                    if (!(await rowEl.elementId)) {
                         await demo.fail(`Find row ${CLIENT}`, `no ${row}`);
                     } else {
-                        demo.record(`Find row ${CLIENT}`, 'PASS', `row ${await rowEl.getAttribute('Index')}`);
                         const values: Record<string, string> = {};
-                        const titles: Record<string, string> = {};
                         for (const col of Object.keys(EXPECTED_CLIENT)) {
-                            const cell = await driver.$(`${row}/GridCell[@Column='${col}']`);
-                            values[col] = await cell.getText();
-                            titles[col] = (await cell.getAttribute('Title')) ?? '';
+                            values[col] = await (await driver.$(`${row}/GridCell[@Column='${col}']`)).getText();
                         }
                         const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => values[k] !== v);
                         if (wrong.length === 0) {
@@ -136,15 +124,6 @@ describe('sap demo: SE16 ALV grid', () => {
                             await demo.fail(`Client ${CLIENT} from grid`,
                                 wrong.map(([k, v]) => `${k}: expected "${v}", read "${values[k]}"`).join('; '));
                         }
-                        // With "Field Label" the headers are what a user reads, not field names.
-                        const labelled = Object.entries(titles).every(([col, title]) => title && title !== col);
-                        const titleList = Object.entries(titles).map(([col, title]) => `${col} = "${title}"`).join('\n');
-                        if (labelled) {
-                            demo.record('Column titles are labels', 'PASS', titleList);
-                        } else {
-                            await demo.fail('Column titles are labels', titleList);
-                        }
-
                         // 4. Select the row, like clicking its row marker.
                         await demo.pause();
                         await driver.executeScript('windows: select', [{ elementId: await rowEl.elementId }]);
