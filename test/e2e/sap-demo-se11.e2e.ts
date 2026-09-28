@@ -4,28 +4,24 @@ import { SapDemo, delay, errMsg } from './helpers/sap-demo.js';
 
 /**
  * Demo: tabs (GuiTab) and a table control (GuiTableControl) in the ABAP Dictionary,
- * display only, starting from SAP Easy Access. Built step by step: each step captures
- * what it lands on, the next one is written from what SAP showed.
+ * display only, starting from SAP Easy Access.
  *
- *   Step 1 ✅ /nSE11 → "Database table" T000 → Display → "Dictionary: Display Table",
- *             opens on the Fields tab. Tabs in tabsTAB_STRIP: Attributes, Delivery and
- *             Maintenance, Fields, Input Help/Check, Currency/Quantity Fields, Indexes;
- *             a tab's content is only in the tree while it is selected. The field list
- *             is table control tblSAPLSD41TC0: 10 columns, RowCount 31,
- *             VisibleRowCount 15 (T000 has 17 fields — 2 need scrolling), cells
- *             txtDD03D-FIELDNAME[col,row] … — the bridge now groups them into TableRow
- *             elements and gives each cell its column Title.
- *   Step 2    Attributes tab: the package field isn't there before the click, is
- *             after (STRM_T000, original language EN). Fields tab: read the MANDT row
- *             through TableRow (data type CLNT, length 3, "Client", key ticked) and
- *             its column titles; list which fields are on screen.
+ *   1. /nSE11 → "Database table" T000 → Display → "Dictionary: Display Table" (opens
+ *      on the Fields tab).
+ *   2. Attributes tab: its fields only exist once it is selected — the package field
+ *      is absent before the click, then reads STRM_T000 (original language EN).
+ *   3. Fields tab: the field list is table control tblSAPLSD41TC0, whose cells the
+ *      bridge groups into TableRow elements with column Titles. Read the MANDT row
+ *      (data type CLNT, length 3, "Client", key ticked) by column Name, and check the
+ *      titles ("Data Type", …).
+ *   4. /n back to SAP Easy Access. Changes nothing.
  *
- * Ends with /n back to SAP Easy Access. Changes nothing.
+ * Only the rows on screen are in the tree: 15 of T000's 17 fields.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo-se11/: SUMMARY.md, the Fields tab's page source
- * (se11-fields.xml), plus the page source of the screen a step failed on.
+ * Output in test-output/sap-demo-se11/: SUMMARY.md, plus the page source of the screen
+ * a step failed on (failed-<step>.xml).
  */
 const DATABASE_TABLE_RADIO = "//GuiRadioButton[@Text='Database table']";
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtRSRD1-TBMA_VAL';
@@ -100,23 +96,6 @@ describe('sap demo: SE11', () => {
 
                 // 2. Fields: the table control, row by row.
                 if (await openTab(FIELDS_TAB, 'Fields', FIELD_LIST)) {
-                    const table = await driver.$(FIELD_LIST);
-                    const xml = await driver.getPageSource();
-                    demo.save('se11-fields.xml', xml);
-
-                    // Diagnostics: the rows as the bridge built them, and the first row's cells.
-                    const rows = [...xml.matchAll(/<TableRow\b[^>]*>([\s\S]*?)<\/TableRow>/g)];
-                    const first = rows[0]?.[1] ?? '';
-                    const firstCells = [...first.matchAll(/<(Gui\w+) [^>]*?Name="([^"]*)"[^>]*?Text="([^"]*)"[^>]*?Title="([^"]*)"/g)]
-                        .map((m) => `${m[1]} ${m[2]} "${m[3]}" — Title "${m[4]}"`);
-                    const names = rows.map((r) => /Name="DD03D-FIELDNAME"[^>]*?Text="([^"]*)"/.exec(r[1])?.[1] ?? '?');
-                    demo.record('Field list (info)', 'INFO', [
-                        `RowCount ${await table.getAttribute('RowCount')}, VisibleRowCount ${await table.getAttribute('VisibleRowCount')}, `
-                        + `${rows.length} TableRow element(s); page source in se11-fields.xml`,
-                        `on screen: ${names.join(', ')}`,
-                        '— first row —', ...(firstCells.length ? firstCells : ['(no cells with a Title)']),
-                    ].join('\n'));
-
                     // The MANDT row, then its cells by column Name. TableRow has no element
                     // id of its own, so check it through its FIELDNAME cell.
                     if (!(await demo.exists(`${MANDT_ROW}/*[@Name='DD03D-FIELDNAME']`))) {

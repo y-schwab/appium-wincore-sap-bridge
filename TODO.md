@@ -6,7 +6,7 @@ Open work on the SAP GUI bridge, found while building the demo e2e tests
 Verified so far on A4H: main window, popups (`wnd[1]`), command field,
 buttons, title and status bar, text fields, labels, checkboxes, radio
 buttons, classic lists, the SAP Easy Access tree, ALV grid rows and
-cells, and dropdowns.
+cells, dropdowns, tabs and table controls.
 
 ## Open run
 
@@ -23,9 +23,11 @@ cells, and dropdowns.
 
 Display-only, built step by step like the others.
 
-- [ ] **Tabs** (`GuiTab`): switch tabs in SE11 → T000 (e.g. Fields) and
-  read content that only exists once the tab is selected.
-- [ ] **Table control** (`GuiTableControl`): read the SE11 field list.
+- [x] **Tabs** (`GuiTab`): switch tabs in SE11 → T000 (e.g. Fields) and
+  read content that only exists once the tab is selected (`sap-demo-se11.e2e.ts`).
+- [x] **Table control** (`GuiTableControl`): read the SE11 field list. Cells
+  grouped into `TableRow` with column `Title`s (`sap-demo-se11.e2e.ts`).
+  `TableRow` is not an element yet (grid rows are): no select / getText on a row.
 - [ ] **Menus** (`GuiMenu`): System → Status from the menu bar, read client
   and user in the popup, close it. Menu items have no screen position, so
   `click()` probably fails — fix in the bridge or document
@@ -38,8 +40,8 @@ Display-only, built step by step like the others.
 - [x] **Dropdown `setValue`**: accept the visible text ("English"), not
   only SAP's internal key (`EN`). Verified on A4H (`sap-demo-dropdown.e2e.ts`).
 - [ ] **Scrolling**: grids and table controls only expose the rows on
-  screen. Reach the rest by scrolling or by exposing every row; test with a
-  table bigger than T000.
+  screen. Reach the rest by scrolling or by exposing every row. Test case:
+  SE11 → T000 → Fields shows 15 of 17 fields (`RowCount` 31, `VisibleRowCount` 15).
 - [ ] **Classic list structure**: turn the labels positioned by
   `lbl[col,row]` into rows and columns (`ListRow` / `@Column`), using the
   ABAP heading color to find the header row. Parked until users ask for it.
