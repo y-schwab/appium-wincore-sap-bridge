@@ -82,11 +82,10 @@ describe('sap demo: dropdown', () => {
                 // 1. Defaults tab: Date Format only exists once it is selected.
                 await demo.pause();
                 await (await driver.$(DEFAULTS_TAB)).click();
-                const dropdown = await driver.$(DATE_FORMAT);
                 let shown = false;
                 const deadline = Date.now() + 10_000;
                 while (!shown && Date.now() < deadline) {
-                    shown = await dropdown.isExisting();
+                    shown = await demo.exists(DATE_FORMAT);
                     if (!shown) {await delay(500);}
                 }
 

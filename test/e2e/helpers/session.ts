@@ -7,6 +7,9 @@ export const APPIUM_SERVER = {
     path: '/',
 };
 
+/** Implicit wait for element finds; SapDemo.exists turns it off for polling checks. */
+export const IMPLICIT_WAIT_MS = 3000;
+
 const SAP_LOGON_EXE = process.env.SAP_LOGON_EXE ?? 'C:\\Program Files (x86)\\SAP\\FrontEnd\\SapGui\\saplogon.exe';
 const SAP_CONNECTION = process.env.SAP_CONNECTION ?? 'A4H';
 
@@ -34,7 +37,7 @@ export async function createSapGuiSession(extraCaps?: Record<string, unknown>): 
             ...extraCaps,
         } as WebdriverIO.Capabilities,
     });
-    await driver.setTimeout({ implicit: 3000 });
+    await driver.setTimeout({ implicit: IMPLICIT_WAIT_MS });
     return driver;
 }
 

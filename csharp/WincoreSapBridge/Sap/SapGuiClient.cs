@@ -379,12 +379,61 @@ internal sealed class SapGuiClient : IDisposable
         var root = Resolve(rootElementId);
         scope = scope.ToLowerInvariant();
 
+        if (TryFindById(root, condition, scope, results)) return results;
+
         if (scope is "element" or "subtree") Visit(root, condition, results);
         if (first && results.Count > 0) return results;
 
         if (scope is "children") VisitChildren(root, c => Visit(c, condition, results), results, first);
         else if (scope is not "element") VisitChildren(root, c => Walk(c, condition, results, first, 0), results, first);
         return results;
+    }
+
+    /// <summary>
+    /// Fast path for an accessibility-id find (<c>~wnd[0]/usr/txtX</c> or a full
+    /// <c>/app/…</c> id): one <c>session.FindById</c> call instead of walking the tree and
+    /// reading every component's Id — which, for an id that isn't on screen, meant
+    /// walking all of it. SAP ids are unique per session, so a miss is a definite "none".
+    /// Only for ids that pin the whole path; a shorter trailing path (<c>usr/txtX</c>)
+    /// still walks. Returns false when the fast path doesn't apply.
+    /// </summary>
+    private bool TryFindById(Disp root, ConditionDto c, string scope, List<string> results)
+    {
+        if (!string.Equals(c.Type, "property", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(c.Property, "AutomationId", StringComparison.OrdinalIgnoreCase)
+            || c.Match != null
+            || scope is not ("descendants" or "subtree")
+            || c.Value is not { ValueKind: System.Text.Json.JsonValueKind.String } value)
+            return false;
+
+        var expected = value.GetString() ?? "";
+        var rootId = root.GetString("Id");
+        string fullId;
+        if (expected.StartsWith("/app/", StringComparison.Ordinal))
+        {
+            fullId = expected;
+        }
+        else if (expected.StartsWith("wnd[", StringComparison.Ordinal))
+        {
+            // Root is a window (…/ses[0]/wnd[0]) or inside one: its session prefix + the id.
+            int at = rootId.IndexOf("/wnd[", StringComparison.Ordinal);
+            if (at < 0) return false;
+            fullId = rootId[..at] + "/" + expected;
+        }
+        else
+        {
+            return false;
+        }
+
+        Disp? hit;
+        try { hit = SessionOrThrow().CallObjOrNull("FindById", fullId, false); }
+        catch { return false; }
+        if (hit == null) return true;
+
+        var id = hit.GetString("Id");
+        if (id.StartsWith(rootId + "/", StringComparison.Ordinal) || (scope == "subtree" && id == rootId))
+            results.Add(IdPrefix + id);
+        return true;
     }
 
     private void Walk(Disp comp, ConditionDto condition, List<string> results, bool first, int depth)
@@ -1009,7 +1058,14 @@ internal sealed class SapGuiClient : IDisposable
             if (column == null) grid.Set("SelectedRows", row.ToString());
             else grid.Call("SetCurrentCell", row, column);
         }
-        else Resolve(elementId).Call("Select");
+        else
+        {
+            var comp = Resolve(elementId);
+            // GuiCheckBox has no Select method: selecting it means ticking it (without
+            // the mouse — in a classic list a click can land as a double-click on the line).
+            if (comp.GetString("Type") == "GuiCheckBox") comp.Set("Selected", true);
+            else comp.Call("Select");
+        }
     }
 
     /// <summary>Expands a tree folder node. No-op for anything else.</summary>

@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Browser, ChainablePromiseElement } from 'webdriverio';
+import { IMPLICIT_WAIT_MS } from './session.js';
 
 /**
  * Shared plumbing for the SAP demo tests (sap-demo-*.e2e.ts): a SUMMARY.md report
@@ -139,10 +140,25 @@ export class SapDemo {
         return false;
     }
 
+    /**
+     * Whether an element is on screen right now — without the session's implicit wait,
+     * which would spend 3 s retrying every "no". For checks inside loops that do their
+     * own waiting.
+     */
+    async exists(selector: string): Promise<boolean> {
+        await this.driver.setTimeout({ implicit: 0 });
+        try {
+            return await (await this.driver.$(selector)).isExisting();
+        } catch {
+            return false;
+        } finally {
+            await this.driver.setTimeout({ implicit: IMPLICIT_WAIT_MS });
+        }
+    }
+
     async textOf(selector: string): Promise<string> {
         try {
-            const el = await this.driver.$(selector);
-            return (await el.isExisting()) ? await el.getText() : '(not found)';
+            return (await this.exists(selector)) ? await (await this.driver.$(selector)).getText() : '(not found)';
         } catch (err) {
             return `(error: ${errMsg(err)})`;
         }
@@ -210,9 +226,20 @@ export class SapDemo {
         return this.fail(step, `screen stayed "${now}"; status bar "${await this.textOf(STATUS_BAR)}"`);
     }
 
+    /**
+     * Types a transaction into the command field and presses Enter. Checks the command
+     * field kept it first: right after a screen change (e.g. through SAP's start screen)
+     * SAP can still be loading and wipe what was typed — then Enter does nothing.
+     */
     async runTransaction(tcode: string, step: string, expectTitle?: string): Promise<boolean> {
-        return await this.typeInto(OKCODE, 'command field', tcode)
-            && this.pressAndWait(ENTER_BUTTON, step, expectTitle);
+        let typed = '';
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            if (!(await this.typeInto(OKCODE, 'command field', tcode))) {return false;}
+            typed = await this.textOf(OKCODE);
+            if (typed === tcode) {return this.pressAndWait(ENTER_BUTTON, step, expectTitle);}
+            await delay(1000);
+        }
+        return this.fail(step, `command field doesn't keep "${tcode}" (reads "${typed}")`);
     }
 
     /**
@@ -239,9 +266,8 @@ export class SapDemo {
                 this.record(step, 'PASS', `→ "${now.replace(/\s{2,}/g, ' ')}"${viaStart ? ' (via start screen)' : ''}`);
                 return true;
             }
-            const start = await this.driver.$(START_BUTTON);
-            if (!viaStart && await start.isExisting()) {
-                await start.click();
+            if (!viaStart && await this.exists(START_BUTTON)) {
+                await (await this.driver.$(START_BUTTON)).click();
                 viaStart = true;
             }
             await delay(500);

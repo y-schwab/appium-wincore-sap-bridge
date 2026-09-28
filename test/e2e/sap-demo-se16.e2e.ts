@@ -15,7 +15,7 @@ import { ENTER_BUTTON, SapDemo, errMsg, refId } from './helpers/sap-demo.js';
  *   4. Read client 001: SE16 shows a classic list here, not an ALV grid — every value is
  *      a GuiLabel whose Id is its position, lbl[column,row]. Find the header row, find
  *      the row whose MANDT is 001, read that row into a record and check it.
- *   5. Tick the row's checkbox, Display (F7) → the entry's detail screen, an ordinary
+ *   5. Tick the row's checkbox (windows: select), Display (F7) → the entry's detail screen, an ordinary
  *      form: read the fields by SAP Name (T000-MTEXT, …), check they match the list
  *      and are all read-only.
  *   6. /n back to SAP Easy Access, so the test can be rerun as is.
@@ -62,10 +62,10 @@ async function readDetail(driver: Browser, columns: string[]): Promise<{ values:
 /**
  * Reads one entry of a classic SAP list (SE16 without ALV) by locators only:
  * header row = the row of the label reading `keyColumn`; entry row = the row whose
- * label in that column reads `keyValue`; then each header's column in the entry row.
+ * label in that column reads `keyValue`; then the `wanted` columns in the entry row.
  * Returns the entry and its list row.
  */
-async function readListEntry(driver: Browser, keyColumn: string, keyValue: string): Promise<{ entry: Record<string, string>; row: number }> {
+async function readListEntry(driver: Browser, keyColumn: string, keyValue: string, wanted: string[]): Promise<{ entry: Record<string, string>; row: number }> {
     const header = await driver.$(`//GuiUserArea/GuiLabel[@Text='${keyColumn}']`);
     if (!(await header.isExisting())) {throw new Error(`no column header "${keyColumn}"`);}
     const headerPos = listPos(await header.elementId);
@@ -86,10 +86,11 @@ async function readListEntry(driver: Browser, keyColumn: string, keyValue: strin
     if (!(await cell.isExisting())) {throw new Error(`no row with ${keyColumn} = ${keyValue}`);}
     const row = listPos(await cell.elementId)!.row;
 
+    // An empty value has no label at all, hence exists() (no implicit wait) first.
     const entry: Record<string, string> = {};
-    for (const c of columns) {
-        const el = await driver.$(`~wnd[0]/usr/lbl[${c.col},${row}]`);
-        entry[c.name] = (await el.isExisting()) ? (await el.getText()).trim() : '';
+    for (const c of columns.filter((c) => wanted.includes(c.name))) {
+        const label = `~wnd[0]/usr/lbl[${c.col},${row}]`;
+        entry[c.name] = (await demo.exists(label)) ? (await (await driver.$(label)).getText()).trim() : '';
     }
     return { entry, row };
 }
@@ -122,7 +123,7 @@ describe('sap demo: SE16 → T000', () => {
         let clientRow: number | undefined;
         if (onResult) {
             try {
-                const { entry, row } = await readListEntry(driver, 'MANDT', CLIENT);
+                const { entry, row } = await readListEntry(driver, 'MANDT', CLIENT, Object.keys(EXPECTED_CLIENT));
                 const wrong = Object.entries(EXPECTED_CLIENT).filter(([k, v]) => entry[k] !== v);
                 if (wrong.length === 0) {
                     demo.record(`Client ${CLIENT}`, 'PASS', `row ${row}: ${JSON.stringify(entry)}`);
@@ -136,18 +137,20 @@ describe('sap demo: SE16 → T000', () => {
             }
         }
 
-        // 5. Tick the row's checkbox (a plain click, like a user) and open its detail view.
+        // 5. Tick the row's checkbox and open its detail view. windows: select, not a
+        //    mouse click: in a run of all demos, the click once landed as a double-click
+        //    on the line, which opens the entry before Display is pressed.
         if (clientRow !== undefined) {
             const checkbox = `~wnd[0]/usr/chk[1,${clientRow}]`;
             let ticked = false;
             try {
                 const box = await driver.$(checkbox);
-                await box.click();
+                await driver.executeScript('windows: select', [{ elementId: box.elementId }]);
                 ticked = await box.isSelected();
                 if (ticked) {
                     demo.record(`Tick row ${CLIENT}`, 'PASS', `${checkbox} selected`);
                 } else {
-                    await demo.fail(`Tick row ${CLIENT}`, `${checkbox} still not selected after click()`);
+                    await demo.fail(`Tick row ${CLIENT}`, `${checkbox} still not selected after windows: select`);
                 }
             } catch (err) {
                 await demo.fail(`Tick row ${CLIENT}`, `${checkbox}: ${errMsg(err)}`);
