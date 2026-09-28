@@ -6,7 +6,7 @@ Open work on the SAP GUI bridge, found while building the demo e2e tests
 Verified so far on A4H: main window, popups (`wnd[1]`), command field,
 buttons, title and status bar, text fields, labels, checkboxes, radio
 buttons, classic lists, the SAP Easy Access tree, ALV grid rows and
-cells, dropdowns, tabs and table controls.
+cells, dropdowns, tabs, table controls and menus.
 
 ## Open run
 
@@ -28,10 +28,9 @@ Display-only, built step by step like the others.
 - [x] **Table control** (`GuiTableControl`): read the SE11 field list. Cells
   grouped into `TableRow` with column `Title`s (`gui-table-control.e2e.ts`).
   `TableRow` is not an element yet (grid rows are): no select / getText on a row.
-- [ ] **Menus** (`GuiMenu`): System → Status from the menu bar, read client
-  and user in the popup, close it. Menu items have no screen position, so
-  `click()` probably fails — fix in the bridge or document
-  `windows: invoke`.
+- [x] **Menus** (`GuiMenu`): System → Status from the menu bar, read client
+  and user in the popup, close it (`gui-menu.e2e.ts`). Menu items have no
+  screen position: `click()` is refused with a pointer to `windows: invoke`.
 - [x] **Dropdowns** (`GuiComboBox`): on SU3's Defaults tab, read a
   dropdown's visible text and its key (`gui-combo-box.e2e.ts`).
 

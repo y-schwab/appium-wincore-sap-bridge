@@ -3,23 +3,21 @@ import { createSapGuiSession, quitSession } from './helpers/session.js';
 import { SapDemo, errMsg } from './helpers/sap-demo.js';
 
 /**
- * GuiMenu: the menu bar, from SAP Easy Access. Built step by step: each step captures
- * what it lands on, the next one is written from what SAP showed.
+ * GuiMenu: the menu bar, from SAP Easy Access.
  *
- *   Step 1    System → Status...: the whole menu tree is in page source without opening
- *             anything (GuiMenubar mbar → GuiMenu menu[n] → menu[n]/menu[m]); items are
- *             found by their text, since their index differs per screen. Menu items
- *             have no screen geometry (-1), so click() must fail with a pointer to
- *             windows: invoke; windows: invoke selects the item → popup "System: Status"
- *             (wnd[1]). Capture it, read client (001) and user (DEVELOPER), close it with
- *             its Continue button (tbar[0]/btn[0]).
- *
- * Ends with /n back to SAP Easy Access. Changes nothing.
+ *   1. The whole menu tree is in page source without opening anything (GuiMenubar mbar
+ *      → GuiMenu menu[n] → menu[n]/menu[m]). Items are found by their text: their
+ *      index differs per screen (System is menu[4] on SAP Easy Access, menu[6] in
+ *      SE11). They have no screen geometry, so click() is refused with a pointer to
+ *      windows: invoke.
+ *   2. windows: invoke on System → Status... → popup "System: Status" (wnd[1]).
+ *   3. Read client (001) and user (DEVELOPER); close with Continue (tbar[0]/btn[0]).
+ *   4. /n back to SAP Easy Access. Changes nothing.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/gui-menu/: SUMMARY.md, the popup's page source
- * (status-popup.xml), plus the page source of the screen a step failed on.
+ * Output in test-output/gui-menu/: SUMMARY.md, plus the page source of the screen a
+ * step failed on (failed-<step>.xml).
  */
 const STATUS_ITEM = "//GuiMenubar/GuiMenu[@Text='System']/GuiMenu[@Text='Status...']";
 const POPUP_TITLE = 'Status'; // partial window title, "System: Status"
@@ -68,8 +66,6 @@ describe('GuiMenu: System → Status', () => {
             // 2. windows: invoke selects it → the status popup.
             const popup = await demo.openPopup(STATUS_ITEM, 'System → Status... (windows: invoke)', POPUP_TITLE, 10_000, 'invoke');
             if (popup) {
-                await demo.captureScreen('Status popup', 'status-popup.xml');
-
                 // 3. Client and user of this session.
                 try {
                     const client = await (await driver.$(CLIENT_FIELD)).getText();
