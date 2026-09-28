@@ -5,8 +5,8 @@ Open work on the SAP GUI bridge, found while building the demo e2e tests
 
 Verified so far on A4H: main window, popups (`wnd[1]`), command field,
 buttons, title and status bar, text fields, labels, checkboxes, radio
-buttons, classic lists, the SAP Easy Access tree and ALV grid rows and
-cells.
+buttons, classic lists, the SAP Easy Access tree, ALV grid rows and
+cells, and dropdowns.
 
 ## Open run
 
@@ -29,14 +29,13 @@ Display-only, built step by step like the others.
   and user in the popup, close it. Menu items have no screen position, so
   `click()` probably fails — fix in the bridge or document
   `windows: invoke`.
-- [ ] **Dropdowns** (`GuiComboBox`): on SU3's Defaults tab, read a
-  dropdown's visible text and its key.
+- [x] **Dropdowns** (`GuiComboBox`): on SU3's Defaults tab, read a
+  dropdown's visible text and its key (`sap-demo-dropdown.e2e.ts`).
 
 ## Bridge
 
-- [ ] **Dropdown `setValue`**: accept the visible text ("English"), not
-  only SAP's internal key (`EN`). Done in the bridge and unit-tested; confirm
-  on A4H with `test/e2e/sap-demo-dropdown.e2e.ts`.
+- [x] **Dropdown `setValue`**: accept the visible text ("English"), not
+  only SAP's internal key (`EN`). Verified on A4H (`sap-demo-dropdown.e2e.ts`).
 - [ ] **Scrolling**: grids and table controls only expose the rows on
   screen. Reach the rest by scrolling or by exposing every row; test with a
   table bigger than T000.
