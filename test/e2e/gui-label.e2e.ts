@@ -22,7 +22,7 @@ import { ENTER_BUTTON, SapDemo, errMsg } from './helpers/sap-demo.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo/: SUMMARY.md, plus the page source of the screen a
+ * Output in test-output/gui-label/: SUMMARY.md, plus the page source of the screen a
  * step failed on (failed-<step>.xml).
  *
  * Env:
@@ -36,7 +36,7 @@ const TABLE = 'T000'; // SAP clients
 const CLIENT = '001';
 const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAER: 'EUR' };
 
-const demo = new SapDemo('sap-demo', 'SAP demo: SE16 → T000');
+const demo = new SapDemo('gui-label', 'GuiLabel: SE16 classic list of T000');
 
 /** `…/usr/lbl[9,6]` → { col: 9, row: 6 }. */
 function listPos(id: string): { col: number; row: number } | undefined {
@@ -84,7 +84,7 @@ async function readListEntry(driver: Browser, keyColumn: string, keyValue: strin
     return { entry, row };
 }
 
-describe('sap demo: SE16 → T000', () => {
+describe('GuiLabel: SE16 classic list', () => {
     beforeAll(async () => {
         demo.resetOutput();
         demo.driver = await createSapGuiSession();

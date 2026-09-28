@@ -4,7 +4,7 @@ import type { Browser, ChainablePromiseElement } from 'webdriverio';
 import { IMPLICIT_WAIT_MS } from './session.js';
 
 /**
- * Shared plumbing for the SAP demo tests (sap-demo-*.e2e.ts): a SUMMARY.md report
+ * Shared plumbing for the SAP control tests (gui-*.e2e.ts, one per SAP control type): a SUMMARY.md report
  * rewritten after every check, and the few moves every SAP flow is made of — type into
  * a field, press a button and wait for the next screen, run a transaction.
  */

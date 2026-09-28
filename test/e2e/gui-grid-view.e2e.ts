@@ -24,7 +24,7 @@ import { ENTER_BUTTON, SapDemo, errMsg } from './helpers/sap-demo.js';
  * back home (driver's windows: start/stopRecordingScreen) into recording.mp4;
  * SAP_DEMO_PACE_MS=1500 waits before each action so the video can be followed.
  *
- * Output in test-output/sap-demo-alv/: SUMMARY.md, plus the page source of the screen
+ * Output in test-output/gui-grid-view/: SUMMARY.md, plus the page source of the screen
  * a step failed on (failed-<step>.xml).
  */
 const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... (F6)", SE16 initial screen
@@ -42,7 +42,7 @@ const EXPECTED_CLIENT = { MANDT: '001', MTEXT: 'SAP SE', ORT01: 'Walldorf', MWAE
 const DEMO_SETTINGS = ['ALV Grid Display', 'Field Label'];
 const ORIGINAL_SETTINGS = ['Standard SE16 list', 'Field Name'];
 
-const demo = new SapDemo('sap-demo-alv', 'SAP demo: SE16 ALV grid');
+const demo = new SapDemo('gui-grid-view', 'GuiGridView: SE16 ALV grid of T000');
 
 /**
  * Sets SE16's user parameters the way a user does: SE16 → User Parameters → pick each
@@ -78,7 +78,7 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
     }
 }
 
-describe('sap demo: SE16 ALV grid', () => {
+describe('GuiGridView: SE16 ALV grid', () => {
     beforeAll(async () => {
         demo.resetOutput();
         demo.driver = await createSapGuiSession();

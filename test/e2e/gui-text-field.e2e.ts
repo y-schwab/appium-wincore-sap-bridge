@@ -25,7 +25,7 @@ import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo-su3/: SUMMARY.md, plus the page source of the screen
+ * Output in test-output/gui-text-field/: SUMMARY.md, plus the page source of the screen
  * a step failed on (failed-<step>.xml).
  */
 // The field next to the "Department" label: SAP gives a label and its input the same
@@ -33,13 +33,13 @@ import { STATUS_BAR, SapDemo, delay, errMsg } from './helpers/sap-demo.js';
 const DEPARTMENT = "//GuiTextField[@Name=//GuiLabel[@Text='Department']/@Name]";
 const SAVE_BUTTON = '~wnd[0]/tbar[0]/btn[11]'; // "Save (Ctrl+S)"
 
-const demo = new SapDemo('sap-demo-su3', 'SAP demo: SU3 own user data');
+const demo = new SapDemo('gui-text-field', 'GuiTextField: SU3 edit, save, reread');
 
 async function department(driver: Browser) {
     return driver.$(DEPARTMENT);
 }
 
-describe('sap demo: SU3', () => {
+describe('GuiTextField: SU3 own user data', () => {
     beforeAll(async () => {
         demo.resetOutput();
         demo.driver = await createSapGuiSession();

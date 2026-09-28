@@ -20,7 +20,7 @@ import { SapDemo, errMsg } from './helpers/sap-demo.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo-se11/: SUMMARY.md, plus the page source of the screen
+ * Output in test-output/gui-table-control/: SUMMARY.md, plus the page source of the screen
  * a step failed on (failed-<step>.xml).
  */
 const DATABASE_TABLE_RADIO = "//GuiRadioButton[@Text='Database table']";
@@ -41,9 +41,9 @@ const EXPECTED_MANDT: Record<string, { text: string; title: string }> = {
     'DD03P-DDTEXT': { text: 'Client', title: 'Short Description' },
 };
 
-const demo = new SapDemo('sap-demo-se11', 'SAP demo: SE11 tabs and table control');
+const demo = new SapDemo('gui-table-control', 'GuiTableControl: SE11 tabs and field list');
 
-describe('sap demo: SE11', () => {
+describe('GuiTableControl: SE11 tabs and field list', () => {
     beforeAll(async () => {
         demo.resetOutput();
         demo.driver = await createSapGuiSession();

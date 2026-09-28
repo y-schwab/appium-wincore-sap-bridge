@@ -1,7 +1,7 @@
 # TODO
 
 Open work on the SAP GUI bridge, found while building the demo e2e tests
-(`test/e2e/sap-demo-*.e2e.ts`). Roughly in priority order.
+(`test/e2e/gui-*.e2e.ts`). Roughly in priority order.
 
 Verified so far on A4H: main window, popups (`wnd[1]`), command field,
 buttons, title and status bar, text fields, labels, checkboxes, radio
@@ -24,21 +24,21 @@ cells, dropdowns, tabs and table controls.
 Display-only, built step by step like the others.
 
 - [x] **Tabs** (`GuiTab`): switch tabs in SE11 → T000 (e.g. Fields) and
-  read content that only exists once the tab is selected (`sap-demo-se11.e2e.ts`).
+  read content that only exists once the tab is selected (`gui-table-control.e2e.ts`).
 - [x] **Table control** (`GuiTableControl`): read the SE11 field list. Cells
-  grouped into `TableRow` with column `Title`s (`sap-demo-se11.e2e.ts`).
+  grouped into `TableRow` with column `Title`s (`gui-table-control.e2e.ts`).
   `TableRow` is not an element yet (grid rows are): no select / getText on a row.
 - [ ] **Menus** (`GuiMenu`): System → Status from the menu bar, read client
   and user in the popup, close it. Menu items have no screen position, so
   `click()` probably fails — fix in the bridge or document
   `windows: invoke`.
 - [x] **Dropdowns** (`GuiComboBox`): on SU3's Defaults tab, read a
-  dropdown's visible text and its key (`sap-demo-dropdown.e2e.ts`).
+  dropdown's visible text and its key (`gui-combo-box.e2e.ts`).
 
 ## Bridge
 
 - [x] **Dropdown `setValue`**: accept the visible text ("English"), not
-  only SAP's internal key (`EN`). Verified on A4H (`sap-demo-dropdown.e2e.ts`).
+  only SAP's internal key (`EN`). Verified on A4H (`gui-combo-box.e2e.ts`).
 - [ ] **Scrolling**: grids and table controls only expose the rows on
   screen. Reach the rest by scrolling or by exposing every row. Test case:
   SE11 → T000 → Fields shows 15 of 17 fields (`RowCount` 31, `VisibleRowCount` 15).

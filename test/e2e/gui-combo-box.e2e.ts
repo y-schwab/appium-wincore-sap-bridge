@@ -21,7 +21,7 @@ import { SapDemo, errMsg } from './helpers/sap-demo.js';
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
- * Output in test-output/sap-demo-dropdown/: SUMMARY.md, plus the page source of the
+ * Output in test-output/gui-combo-box/: SUMMARY.md, plus the page source of the
  * screen a step failed on (failed-<step>.xml).
  */
 const DEFAULTS_TAB = "//GuiTab[@Text='Defaults']";
@@ -33,9 +33,9 @@ const MDY_DASH = { key: '3', text: 'MM-DD-YYYY (Gregorian Date)' };
 
 interface Entry { key: string; text: string }
 
-const demo = new SapDemo('sap-demo-dropdown', 'SAP demo: dropdown setValue by visible text');
+const demo = new SapDemo('gui-combo-box', 'GuiComboBox: SU3 dropdown by text or key');
 
-describe('sap demo: dropdown', () => {
+describe('GuiComboBox: SU3 Date Format', () => {
     beforeAll(async () => {
         demo.resetOutput();
         demo.driver = await createSapGuiSession();
