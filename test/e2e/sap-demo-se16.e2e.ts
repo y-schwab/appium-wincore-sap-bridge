@@ -133,8 +133,14 @@ describe('sap demo: SE16 → T000', () => {
             const checkbox = `~wnd[0]/usr/chk[1,${clientRow}]`;
             let ticked = false;
             try {
-                await driver.executeScript('windows: select', [{ elementId: (await driver.$(checkbox)).elementId }]);
-                ticked = true;
+                const box = await driver.$(checkbox);
+                await driver.executeScript('windows: select', [{ elementId: box.elementId }]);
+                ticked = await box.isSelected();
+                if (ticked) {
+                    demo.record(`Tick row ${CLIENT}`, 'PASS', `${checkbox} selected`);
+                } else {
+                    await demo.fail(`Tick row ${CLIENT}`, `${checkbox} still not selected after windows: select`);
+                }
             } catch (err) {
                 await demo.fail(`Tick row ${CLIENT}`, `${checkbox}: ${errMsg(err)}`);
             }

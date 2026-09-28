@@ -62,16 +62,20 @@ describe('sap demo: dropdown', () => {
                 const dropdown = await driver.$(DATE_FORMAT);
                 const key = async () => String(await dropdown.getAttribute('Key') ?? '');
 
-                /** windows: setValue, then check the selected entry's key. */
+                /**
+                 * windows: setValue, then check the selected entry: its key, and the text
+                 * a user sees (the bridge trims SAP's ~250 blanks of padding off it).
+                 */
                 const setAndCheck = async (step: string, value: string, expected: Entry) => {
                     try {
                         await demo.pause();
                         await driver.executeScript('windows: setValue', [{ elementId: dropdown.elementId, value }]);
-                        const now = await key();
-                        if (now === expected.key) {
-                            demo.record(step, 'PASS', `"${value}" → Key '${now}'`);
+                        const now = { key: await key(), text: await dropdown.getText() };
+                        const detail = `"${value}" → Key '${now.key}', "${now.text}"`;
+                        if (now.key === expected.key && now.text === expected.text) {
+                            demo.record(step, 'PASS', detail);
                         } else {
-                            await demo.fail(step, `"${value}" → Key '${now}'; expected '${expected.key}' ("${expected.text}")`);
+                            await demo.fail(step, `${detail}; expected Key '${expected.key}', "${expected.text}"`);
                         }
                     } catch (err) {
                         await demo.fail(step, `"${value}": ${errMsg(err)}`);

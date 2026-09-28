@@ -11,8 +11,9 @@ import { SapDemo, errMsg } from './helpers/sap-demo.js';
  *   2. Attributes tab: its fields only exist once it is selected — read the package
  *      (STRM_T000) and original language (EN).
  *   3. Fields tab: the field list is table control tblSAPLSD41TC0, whose cells the
- *      bridge groups into TableRow elements. Read the MANDT row by column Name: data
- *      type CLNT, length 3, "Client", key ticked.
+ *      bridge groups into TableRow elements with column Titles. Read the MANDT row by
+ *      column Name: data type CLNT, length 3, "Client", key ticked; and each cell's
+ *      column Title ("Data Type", "Length", "Short Description").
  *   4. /n back to SAP Easy Access. Changes nothing.
  *
  * Only the rows on screen are in the tree: 15 of T000's 17 fields.
@@ -33,11 +34,11 @@ const PACKAGE = "//GuiCTextField[@Name='RSDXX-DEVCLASS']"; // Attributes tab onl
 const LANGUAGE = "//GuiCTextField[@Name='RSDXX-MALANGU']";
 const MANDT_ROW = `//GuiTableControl/TableRow[*[@Name='DD03D-FIELDNAME' and @Text='MANDT']]`;
 
-/** MANDT in T000's field list, by column Name. */
-const EXPECTED_MANDT: Record<string, string> = {
-    'DD03D-DATATYPE': 'CLNT',
-    'DD03P-LENG': '3',
-    'DD03P-DDTEXT': 'Client',
+/** MANDT in T000's field list, by column Name: value and column title. */
+const EXPECTED_MANDT: Record<string, { text: string; title: string }> = {
+    'DD03D-DATATYPE': { text: 'CLNT', title: 'Data Type' },
+    'DD03P-LENG': { text: '3', title: 'Length' },
+    'DD03P-DDTEXT': { text: 'Client', title: 'Short Description' },
 };
 
 const demo = new SapDemo('sap-demo-se11', 'SAP demo: SE11 tabs and table control');
@@ -84,13 +85,20 @@ describe('sap demo: SE11', () => {
                 // 2. Fields: the MANDT row of the field list, its cells by column Name.
                 await clickOn(FIELDS_TAB);
                 const values: Record<string, string> = {};
+                const titles: Record<string, string> = {};
                 for (const name of Object.keys(EXPECTED_MANDT)) {
-                    values[name] = (await (await driver.$(`${MANDT_ROW}/*[@Name='${name}']`)).getText()).trim();
+                    const cell = await driver.$(`${MANDT_ROW}/*[@Name='${name}']`);
+                    values[name] = (await cell.getText()).trim();
+                    titles[name] = String(await cell.getAttribute('Title') ?? '');
                 }
                 const key = await (await driver.$(`${MANDT_ROW}/GuiCheckBox[@Name='DD03P-KEYFLAG']`)).isSelected();
-                const wrong = Object.entries(EXPECTED_MANDT).filter(([k, v]) => values[k] !== v);
+                const rowOk = Object.entries(EXPECTED_MANDT).every(([k, v]) => values[k] === v.text);
                 const rowDetail = `${JSON.stringify(values)}, key ${key}`;
-                if (wrong.length === 0 && key) {demo.record('MANDT row', 'PASS', rowDetail);} else {await demo.fail('MANDT row', rowDetail);}
+                if (rowOk && key) {demo.record('MANDT row', 'PASS', rowDetail);} else {await demo.fail('MANDT row', rowDetail);}
+
+                const titlesOk = Object.entries(EXPECTED_MANDT).every(([k, v]) => titles[k] === v.title);
+                const titleDetail = Object.entries(titles).map(([k, t]) => `${k} = "${t}"`).join('\n');
+                if (titlesOk) {demo.record('Column titles', 'PASS', titleDetail);} else {await demo.fail('Column titles', titleDetail);}
             }
         } catch (err) {
             await demo.fail('SE11 flow', errMsg(err));
