@@ -117,8 +117,9 @@ describe('sap demo: SE11', () => {
                         '— first row —', ...(firstCells.length ? firstCells : ['(no cells with a Title)']),
                     ].join('\n'));
 
-                    // The MANDT row, then its cells by column Name.
-                    if (!(await demo.exists(MANDT_ROW))) {
+                    // The MANDT row, then its cells by column Name. TableRow has no element
+                    // id of its own, so check it through its FIELDNAME cell.
+                    if (!(await demo.exists(`${MANDT_ROW}/*[@Name='DD03D-FIELDNAME']`))) {
                         await demo.fail('MANDT row', `no ${MANDT_ROW}`);
                     } else {
                         const values: Record<string, string> = {};
