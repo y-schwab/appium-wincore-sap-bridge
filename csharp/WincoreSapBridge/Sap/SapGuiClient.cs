@@ -554,6 +554,20 @@ internal sealed class SapGuiClient : IDisposable
             // Ticked state, so XPath can pick e.g. //GuiCheckBox[@Selected='True'].
             if (type is "GuiCheckBox" or "GuiRadioButton")
                 el.SetAttribute("Selected", component.GetBool("Selected").ToString());
+            // Dropdown: the selected entry's key next to its visible Text, plus every entry
+            // as a ComboBoxEntry child (not an element of its own — setValue on the
+            // dropdown takes either the key or the text).
+            if (type == "GuiComboBox")
+            {
+                el.SetAttribute("Key", component.GetString("Key"));
+                foreach (var entry in ComboEntries(component))
+                {
+                    var entryEl = doc.CreateElement("ComboBoxEntry");
+                    entryEl.SetAttribute("Key", Sanitize(entry.Key));
+                    entryEl.SetAttribute("Value", Sanitize(entry.Value));
+                    el.AppendChild(entryEl);
+                }
+            }
 
             // GuiVComponent screen geometry — absolute screen pixels. SAP has no cheap
             // "root rect" to offset against; the Actions layer can use absolute coords
@@ -919,8 +933,13 @@ internal sealed class SapGuiClient : IDisposable
                 if (ParseBool(value)) comp.Call("Select");
                 break;
             case "GuiComboBox":
-                comp.Set("Key", value);
+            {
+                // Accept the visible text ("English") as well as the key ("EN"). No
+                // entries to check against (unreadable list): pass the value on as a key.
+                var entries = ComboEntries(comp);
+                comp.Set("Key", entries.Count == 0 ? value : ComboBoxEntries.ResolveKey(entries, value));
                 break;
+            }
             default:
                 comp.Set("Text", value); // GuiTextField, GuiCTextField, GuiPasswordField, GuiTextEdit…
                 break;
@@ -1013,6 +1032,28 @@ internal sealed class SapGuiClient : IDisposable
     private static bool ParseBool(string s) =>
         s.Equals("true", StringComparison.OrdinalIgnoreCase) || s == "1" ||
         s.Equals("x", StringComparison.OrdinalIgnoreCase) || s.Equals("yes", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A <c>GuiComboBox</c>'s entries (<c>Entries</c>: <c>GuiComboBoxEntry</c> Key / Value), in list order.</summary>
+    private static List<ComboBoxEntry> ComboEntries(Disp combo)
+    {
+        var result = new List<ComboBoxEntry>();
+        try
+        {
+            var entries = combo.GetObjOrNull("Entries");
+            int n = entries?.GetInt("Count") ?? 0;
+            for (int i = 0; i < n; i++)
+            {
+                try
+                {
+                    var entry = entries!.GetObjOrNull("ElementAt", i);
+                    if (entry != null) result.Add(new ComboBoxEntry(entry.GetString("Key"), entry.GetString("Value")));
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return result;
+    }
 
     private static string Sanitize(string s)
     {

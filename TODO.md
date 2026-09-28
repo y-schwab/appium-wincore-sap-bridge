@@ -35,7 +35,8 @@ Display-only, built step by step like the others.
 ## Bridge
 
 - [ ] **Dropdown `setValue`**: accept the visible text ("English"), not
-  only SAP's internal key (`EN`).
+  only SAP's internal key (`EN`). Done in the bridge and unit-tested; confirm
+  on A4H with `test/e2e/sap-demo-dropdown.e2e.ts`.
 - [ ] **Scrolling**: grids and table controls only expose the rows on
   screen. Reach the rest by scrolling or by exposing every row; test with a
   table bigger than T000.
@@ -63,5 +64,9 @@ Display-only, built step by step like the others.
   options). Windows' gdigrab rejects them and ffmpeg exits, so
   `windows: startRecordingScreen` fails. Map `captureCursor` to
   `-draw_mouse`; gdigrab can't highlight clicks.
+- [ ] `windows: setValue` (`patternSetValue`) retries any failed
+  `setElementValue` as a RangeValue number, so a bridge error (e.g. "no
+  dropdown entry 'X'. Entries: …") reaches the test as "not a valid number".
+  Only fall back when the value is numeric, or rethrow the first error.
 - [ ] Decide whether SAP function keys (F2, F8, …) need a command. Pressing
   toolbar buttons covers them so far; the bridge's `sendVKey` is disabled.

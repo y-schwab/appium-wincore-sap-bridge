@@ -114,7 +114,26 @@ double-clicks a cell, `setValue` writes an editable cell. Only the visible page 
 listed. Like tree nodes, rows and cells have no screen geometry, so plain `click()` is
 not supported.
 
+### Dropdowns
+
+A `GuiComboBox` carries the selected entry's `Key` next to its visible `Text`, and lists
+its entries as `ComboBoxEntry` children (`Key`, `Value`) in page source. Set it with
+`windows: setValue`, passing either the visible text or the key:
+
+```ts
+const date = await driver.$('~wnd[0]/usr/…/cmbSUID_ST_NODE_DEFAULTS-DATFM');
+await driver.executeScript('windows: setValue', [{ elementId: date.elementId, value: 'MM/DD/YYYY' }]);
+await date.getAttribute('Key');                                 // '2'
+```
+
+A key wins over another entry's text; then the text matches exactly, then ignoring case,
+then the key ignoring case. Blanks around either are ignored. A value that matches no
+entry, or several, is an error. Plain `element.setValue()` doesn't reach this: the driver
+clears the field and types the text as keystrokes.
+
 ## Testing
+
+`npm run test:unit` runs the C# unit tests (`csharp/WincoreSapBridge.Tests`, no SAP needed).
 
 The e2e suite is currently scaled down to `sap-discovery.e2e.ts`: it launches SAP Logon
 through the driver (`appium:app` = `saplogon.exe`, `appium:noReset` to reuse a running

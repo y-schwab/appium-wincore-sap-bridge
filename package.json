@@ -26,7 +26,8 @@
     "watch": "tsc -b --watch",
     "lint": "eslint .",
     "test:e2e": "npx vitest run --config vitest.e2e.config.ts",
-    "inspect": "node scripts/sap-inspect.mjs"
+    "inspect": "node scripts/sap-inspect.mjs",
+    "test:unit": "dotnet test csharp/WincoreSapBridge.Tests"
   },
   "author": "Automate The Planet",
   "license": "Apache-2.0",

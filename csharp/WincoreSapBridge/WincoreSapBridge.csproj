@@ -21,4 +21,8 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="WincoreSapBridge.Tests" />
+  </ItemGroup>
+
 </Project>
