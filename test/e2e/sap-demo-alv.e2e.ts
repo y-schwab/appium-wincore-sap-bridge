@@ -1,29 +1,22 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSapGuiSession, quitSession } from './helpers/session.js';
-import { ENTER_BUTTON, SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
+import { ENTER_BUTTON, SapDemo, errMsg } from './helpers/sap-demo.js';
 
 /**
- * Demo: ALV grid, and a popup on the way. SE16N doesn't exist on this system, and SE16
- * shows a classic list for this user — its output format is a per-user setting in
- * SE16's "User Parameters" popup. So this test switches it to ALV grid through that
- * popup, shows T000 in the grid, and switches it back at the end. Built step by step:
- * each step captures what it lands on, the next one is written from what SAP showed.
+ * Demo: ALV grid, and a popup on the way, starting from SAP Easy Access. SE16N doesn't
+ * exist on this system, and SE16 shows a classic list for this user — its output format
+ * is a per-user setting in SE16's "User Parameters" popup.
  *
- *   Step 1 ✅ /nSE16 → User Parameters (F6) → popup "User-Specific Settings" (wnd[1],
- *             its own window, served by the same attach). Data Browser tab: radio
- *             buttons "ALV Grid Display" / "ALV List" / "Standard SE16 list";
- *             buttons "Transfer (Enter)" / "Cancel (F12)".
- *   Step 2 ✅ pick "ALV Grid Display", Transfer; T000 → Execute → grid
- *             (GuiShell SubType GridView, 2 GridRow, 17 GridCell each); restore
- *             "Standard SE16 list". XPath found no GridRow/GridCell yet: they had no
- *             element ids — the bridge now maps them (like tree nodes).
- *   Step 3 ✅ read client 001 from the grid: the GridRow whose MANDT cell is 001, then
- *             its cells by Column; select the row with windows: select. Column Title
- *             came back as the field name (MANDT) — SE16's "Field Name" setting.
- *   Step 4    also pick "Field Label" in the popup, so column headers are what a user
- *             reads; check the titles are labels; restore "Field Name" at the end.
- *
- * Ends with /n back to SAP Easy Access.
+ *   1. /nSE16 → User Parameters (F6) → popup "User-Specific Settings" (wnd[1], its own
+ *      window): pick "ALV Grid Display" and "Field Label" (column headers show labels,
+ *      not field names), Transfer.
+ *   2. T000 → selection screen → Execute → ALV grid (GuiShell SubType GridView).
+ *   3. Read client 001: the GridRow whose MANDT cell is 001, then its cells by Column
+ *      (stable across logon languages, unlike the visible Title); check the Titles are
+ *      labels ("Cl.", "Name", …).
+ *   4. Select the row (windows: select).
+ *   5. Always put "Standard SE16 list" and "Field Name" back — the SE16 demo expects
+ *      the classic list — then /n back to SAP Easy Access.
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access.
  *
@@ -31,8 +24,8 @@ import { ENTER_BUTTON, SapDemo, errMsg, shortId } from './helpers/sap-demo.js';
  * back home (driver's windows: start/stopRecordingScreen) into recording.mp4;
  * SAP_DEMO_PACE_MS=1500 waits before each action so the video can be followed.
  *
- * Output in test-output/sap-demo-alv/: SUMMARY.md, page source of each explored
- * screen, plus the page source of the screen a step failed on (failed-<step>.xml).
+ * Output in test-output/sap-demo-alv/: SUMMARY.md, plus the page source of the screen
+ * a step failed on (failed-<step>.xml).
  */
 const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... (F6)", SE16 initial screen
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME'; // SE16 initial screen
@@ -68,7 +61,7 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
             if (!(await radio.isSelected())) {
                 return demo.fail(`Pick "${choice}"`, 'radio button not selected after click()');
             }
-            demo.record(`Pick "${choice}"`, 'PASS', shortId(await radio.elementId));
+            demo.record(`Pick "${choice}"`, 'PASS', 'selected');
         }
 
         await demo.pause();
@@ -116,8 +109,7 @@ describe('sap demo: SE16 ALV grid', () => {
                     const grid = await driver.$(GRID);
                     const found = await grid.waitForExist({ timeout: 15_000 }).then(() => true, () => false);
                     if (found) {
-                        demo.record('Grid after Execute', 'PASS',
-                            `${shortId(await grid.elementId)}, title "${await demo.textOf('~wnd[0]/titl')}"`);
+                        demo.record('Grid after Execute', 'PASS', `title "${await demo.textOf('~wnd[0]/titl')}"`);
                     } else {
                         await demo.fail('Grid after Execute', `no ${GRID} within 15s`);
                     }
@@ -129,7 +121,7 @@ describe('sap demo: SE16 ALV grid', () => {
                     if (!(await rowEl.isExisting())) {
                         await demo.fail(`Find row ${CLIENT}`, `no ${row}`);
                     } else {
-                        demo.record(`Find row ${CLIENT}`, 'PASS', await rowEl.elementId);
+                        demo.record(`Find row ${CLIENT}`, 'PASS', `row ${await rowEl.getAttribute('Index')}`);
                         const values: Record<string, string> = {};
                         const titles: Record<string, string> = {};
                         for (const col of Object.keys(EXPECTED_CLIENT)) {
@@ -169,7 +161,7 @@ describe('sap demo: SE16 ALV grid', () => {
         } catch (err) {
             await demo.fail('ALV flow', errMsg(err));
         } finally {
-            // 3. Always put the setting back — the SE16 demo expects the classic list.
+            // 5. Always put the setting back — the SE16 demo expects the classic list.
             await demo.closePopups();
             await setUserParameters(ORIGINAL_SETTINGS);
         }

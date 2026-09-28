@@ -10,13 +10,14 @@ cells, and dropdowns.
 
 ## Open run
 
-- [ ] Run the ALV demo with SE16's "Field Label" setting and check the grid
-  column titles are the labels users see, not field names.
-- [ ] If they are, locate grid cells by the visible `@Title` instead of
-  `@Column='MANDT'`.
-- [ ] Slim the ALV demo down to the verified flow.
-- [ ] Run all three demos (SE16, SU3, ALV) in one go to check they don't
-  interfere with each other.
+- [x] Run the ALV demo with SE16's "Field Label" setting and check the grid
+  column titles are the labels users see, not field names ("Cl.", "Name", …).
+- [x] ~~If they are, locate grid cells by the visible `@Title` instead of
+  `@Column='MANDT'`.~~ Kept `@Column`: titles change with logon language and
+  column width. `@Title` works in XPath too.
+- [x] Slim the ALV demo down to the verified flow.
+- [ ] Run all four demos (SE16, SU3, ALV, dropdown) in one go to check they
+  don't interfere with each other.
 
 ## New demo test
 
