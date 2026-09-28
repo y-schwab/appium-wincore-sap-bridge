@@ -355,7 +355,8 @@ export class SapDemo {
     /**
      * Discovery for a screen that isn't scripted yet: saves its page source and records
      * what a person would look at — title, status bar, windows, tabs, input fields,
-     * application toolbar buttons, shell controls (grid, tree, …) with their grid rows.
+     * application toolbar buttons, shell controls (grid, tree, …) with their grid rows,
+     * table controls with their row counts.
      */
     async captureScreen(label: string, file: string): Promise<void> {
         const d = this.driver;
@@ -388,6 +389,11 @@ export class SapDemo {
             async (el) => (await el.getText()).trim())).filter((t) => t !== '(none)');
         const shells = [...xml.matchAll(/<GuiShell\b[^>]*\bId="([^"]*)"[^>]*\bSubType="([^"]*)"/g)]
             .map((m) => `${m[2]} ${shortId(m[1])}`);
+        // Table controls: rows in all vs. on screen, where it's scrolled to.
+        const tables = [...xml.matchAll(/<GuiTableControl\b[^>]*>/g)].map((m) => {
+            const a = (name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(m[0])?.[1] ?? '?';
+            return `${shortId(a('Id'))}: RowCount ${a('RowCount')}, VisibleRowCount ${a('VisibleRowCount')}, ScrollPosition ${a('ScrollPosition')}`;
+        });
         const gridRows = (xml.match(/<GridRow\b/g) ?? []).length;
         const gridCells = (xml.match(/<GridCell\b/g) ?? []).length;
 
@@ -400,6 +406,7 @@ export class SapDemo {
             ...(popupTexts.length ? ['— popup text —', ...popupTexts] : []),
             '— buttons —', ...buttons,
             '— shells —', ...(shells.length ? shells : ['(none)']),
+            '— table controls —', ...(tables.length ? tables : ['(none)']),
             `GridRow: ${gridRows}, GridCell: ${gridCells}`,
         ].join('\n'));
     }

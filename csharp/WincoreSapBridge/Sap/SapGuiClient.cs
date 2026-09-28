@@ -603,6 +603,19 @@ internal sealed class SapGuiClient : IDisposable
             // Ticked state, so XPath can pick e.g. //GuiCheckBox[@Selected='True'].
             if (type is "GuiCheckBox" or "GuiRadioButton")
                 el.SetAttribute("Selected", component.GetBool("Selected").ToString());
+            // Table control: its cells are ordinary children (txtX[col,row]), but only the
+            // rows on screen — how many there are in all, and where the view is scrolled to.
+            if (type == "GuiTableControl")
+            {
+                el.SetAttribute("RowCount", component.GetInt("RowCount").ToString());
+                el.SetAttribute("VisibleRowCount", component.GetInt("VisibleRowCount").ToString());
+                try
+                {
+                    el.SetAttribute("ScrollPosition",
+                        component.GetObj("VerticalScrollbar").GetInt("Position").ToString());
+                }
+                catch { }
+            }
             // Dropdown: the selected entry's key next to its visible Text, plus every entry
             // as a ComboBoxEntry child (not an element of its own — setValue on the
             // dropdown takes either the key or the text).
