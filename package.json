@@ -17,7 +17,8 @@
     "build/lib/**/*",
     "native/plugin/**/*",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -27,7 +28,8 @@
     "lint": "eslint .",
     "test:e2e": "npx vitest run --config vitest.e2e.config.ts",
     "inspect": "node scripts/sap-inspect.mjs",
-    "test:unit": "dotnet test csharp/WincoreSapBridge.Tests"
+    "test:unit": "dotnet test csharp/WincoreSapBridge.Tests",
+    "prepublishOnly": "npm run build:all"
   },
   "author": "Automate The Planet",
   "license": "Apache-2.0",

@@ -167,7 +167,7 @@ async function checkTreeExpand(driver: Browser, tree: string): Promise<void> {
     record('Find folder by Text', byTextId === folderId ? 'PASS' : 'FAIL', `@Text="${text}" → ${byTextId}`);
 
     const childXPath = `${tree}//TreeNode[@Key='${key}']/TreeNode`;
-    const before = (await driver.$$(childXPath)).length;
+    const before = (await driver.$$(childXPath).getElements()).length;
     record('Collapsed folder shows no children', before === 0 ? 'PASS' : 'FAIL', `${before} child TreeNode(s)`);
 
     try {
@@ -181,7 +181,7 @@ async function checkTreeExpand(driver: Browser, tree: string): Promise<void> {
 
     const expanded = await driver.getPageSource();
     save('03-page-source-after-expand.xml', expanded);
-    const children = await driver.$$(childXPath);
+    const children = await driver.$$(childXPath).getElements();
     // Sequential: WDIO's ElementArray.map returns a promise, not an array.
     const childTexts: string[] = [];
     for (const c of children) {childTexts.push(await c.getText());}
