@@ -114,6 +114,21 @@ double-clicks a cell, `setValue` writes an editable cell. Only the visible page 
 listed. Like tree nodes, rows and cells have no screen geometry, so plain `click()` is
 not supported.
 
+### Table controls
+
+A `GuiTableControl` (e.g. SE11's field list) lists its cells as ordinary fields named by
+screen position (`txtDD03D-FIELDNAME[col,row]`). In page source they are grouped into
+`TableRow` elements (`Index` = screen row, `AbsoluteRow` = row in the whole table), and
+each cell carries its column `Title`. The table carries `RowCount`, `VisibleRowCount`
+and `ScrollPosition`. Only the rows on screen are listed.
+
+```ts
+const row = "//GuiTableControl/TableRow[*[@Name='DD03D-FIELDNAME' and @Text='MANDT']]";
+await (await driver.$(`${row}/*[@Name='DD03D-DATATYPE']`)).getText();   // 'CLNT'
+```
+
+`TableRow` itself is not an element; act on its cells.
+
 ### Dropdowns
 
 A `GuiComboBox` carries the selected entry's `Key` next to its visible `Text`, and lists

@@ -670,6 +670,16 @@ internal sealed class SapGuiClient : IDisposable
         // Grids and trees are shells: Type "GuiShell", kind in SubType ("GridView", "Tree").
         try { if (subType == "GridView") AppendGridRows(doc, el, component, sapId, nodeToId, nextNodeKey); } catch { }
         try { if (subType == "Tree") AppendTreeNodes(doc, el, component, sapId, nodeToId, nextNodeKey); } catch { }
+        // Table control: its flat cells regrouped into TableRow elements, with column titles.
+        try
+        {
+            if (type == "GuiTableControl")
+            {
+                int.TryParse(el.GetAttribute("ScrollPosition"), out var scroll);
+                TableControlRows.Group(el, scroll, TableColumnTitles(component));
+            }
+        }
+        catch { }
 
         return el;
     }
@@ -723,6 +733,30 @@ internal sealed class SapGuiClient : IDisposable
             parent.AppendChild(rowEl);
         }
         parent.SetAttribute("RowCount", rowCount.ToString());
+    }
+
+    /// <summary>A table control's column titles ("Field", "Data Type", …), by column index.</summary>
+    private static List<string> TableColumnTitles(Disp table)
+    {
+        var result = new List<string>();
+        var columns = table.GetObjOrNull("Columns");
+        int n = columns?.GetInt("Count") ?? 0;
+        for (int c = 0; c < n; c++)
+        {
+            try { result.Add(Sanitize(columns!.GetObj("ElementAt", c).GetString("Title"))); }
+            catch { result.Add(""); }
+        }
+        return result;
+    }
+
+    /// <summary>The column title of a table-control cell, or null if it isn't one.</summary>
+    private static string? TableCellTitle(Disp comp)
+    {
+        if (!TableControlRows.TryParseCell(comp.GetString("Id"), out var column, out _)) return null;
+        var parent = comp.GetObjOrNull("Parent");
+        if (parent == null || parent.GetString("Type") != "GuiTableControl") return null;
+        var titles = TableColumnTitles(parent);
+        return column < titles.Count ? titles[column] : null;
     }
 
     /// <summary>A grid's column ids in display order.</summary>
@@ -888,6 +922,8 @@ internal sealed class SapGuiClient : IDisposable
             // Typed, not the generic GetString below: IsSelected needs a bool back.
             "selected" or "isselected" => comp.GetBool("Selected"),
             "iconname" => comp.GetString("IconName"),
+            // A table-control cell's column title, as in page source.
+            "title" => TableCellTitle(comp) ?? comp.GetString("Title"),
             "screenleft" or "x" => comp.GetInt("ScreenLeft").ToString(),
             "screentop" or "y" => comp.GetInt("ScreenTop").ToString(),
             "width" => comp.GetInt("Width").ToString(),
