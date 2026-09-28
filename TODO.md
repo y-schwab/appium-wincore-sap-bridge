@@ -41,8 +41,8 @@ Display-only, built step by step like the others.
 - [x] **Scrolling**: decided to accept the limitation — page source lists
   only the rows on screen (table controls and classic lists don't have the
   others on the client at all). Tests scroll like a user, with the mouse wheel
-  (`windows: scroll`), and find again. Needs the SAP window in focus. To
-  confirm on A4H: `gui-table-control.e2e.ts` scrolls to LOGSYS.
+  (`windows: scroll`), and find again. Needs the SAP window in focus.
+  Verified on A4H: `gui-table-control.e2e.ts` scrolls to LOGSYS.
 - [ ] **Classic list structure**: turn the labels positioned by
   `lbl[col,row]` into rows and columns (`ListRow` / `@Column`), using the
   ABAP heading color to find the header row. Parked until users ask for it.
