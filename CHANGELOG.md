@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### New since 1.0.0
+
+- Dropdown entries are elements (`sap:<dropdown id>#entry:<key>`):
+  `windows: select` / `windows: invoke` pick one, `getText` and `isSelected`
+  read it; `click()` is refused (no screen position). Page source marks the
+  current entry with `Selected`.
+
 ## 1.0.0 — 2026-09-28
 
 First release. SAP GUI for Windows controls, served to

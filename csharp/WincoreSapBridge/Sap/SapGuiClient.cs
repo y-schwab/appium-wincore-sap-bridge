@@ -42,6 +42,7 @@ internal sealed class SapGuiClient : IDisposable
     private const string NodeMarker = "#node:";
     private const string RowMarker = "#row:";
     private const string CellMarker = "#cell:";
+    private const string EntryMarker = "#entry:";
 
     private Disp? _engine;
     private Disp? _session;
@@ -278,10 +279,35 @@ internal sealed class SapGuiClient : IDisposable
         return (Resolve(raw[..at]), cellRow, rest[(colon + 1)..]);
     }
 
+    /// <summary>
+    /// Dropdown entries are not SAP components either — a <c>GuiComboBox</c> lists them
+    /// in <c>Entries</c> and selects one by key. Entry id: the dropdown's id +
+    /// <c>#entry:</c> + the entry key (last, since keys can hold any character, even
+    /// be blank).
+    /// </summary>
+    internal static string EntryId(string comboId, string key) => IdPrefix + comboId + EntryMarker + key;
+
+    internal static bool TryParseEntryId(string elementId, out string comboId, out string key)
+    {
+        var raw = RawId(elementId);
+        int at = raw.IndexOf(EntryMarker, StringComparison.Ordinal);
+        comboId = at < 0 ? "" : raw[..at];
+        key = at < 0 ? "" : raw[(at + EntryMarker.Length)..];
+        return at >= 0;
+    }
+
+    /// <summary>The dropdown an entry id points into, plus the entry's key.</summary>
+    private (Disp Combo, string Key)? ResolveEntry(string elementId)
+    {
+        if (!TryParseEntryId(elementId, out var comboId, out var key)) return null;
+        return (Resolve(comboId), key);
+    }
+
     private static bool IsVirtualId(string elementId)
     {
         var raw = RawId(elementId);
-        return raw.Contains(NodeMarker, StringComparison.Ordinal)
+        return raw.Contains(EntryMarker, StringComparison.Ordinal)
+            || raw.Contains(NodeMarker, StringComparison.Ordinal)
             || raw.Contains(RowMarker, StringComparison.Ordinal)
             || raw.Contains(CellMarker, StringComparison.Ordinal);
     }
@@ -291,6 +317,8 @@ internal sealed class SapGuiClient : IDisposable
     {
         try
         {
+            if (ResolveEntry(elementId) is var (combo, entryKey))
+                return ComboEntries(combo).Any(e => e.Key == entryKey);
             if (ResolveNode(elementId) is var (tree, key))
             {
                 var keys = tree.CallObjOrNull("GetAllNodeKeys");
@@ -617,16 +645,24 @@ internal sealed class SapGuiClient : IDisposable
                 catch { }
             }
             // Dropdown: the selected entry's key next to its visible Text, plus every entry
-            // as a ComboBoxEntry child (not an element of its own — setValue on the
-            // dropdown takes either the key or the text).
+            // as a ComboBoxEntry child — an element of its own (sap:<dropdown>#entry:<key>),
+            // so windows: select can pick it.
             if (type == "GuiComboBox")
             {
-                el.SetAttribute("Key", component.GetString("Key"));
+                var selectedKey = component.GetString("Key");
+                el.SetAttribute("Key", selectedKey);
                 foreach (var entry in ComboEntries(component))
                 {
                     var entryEl = doc.CreateElement("ComboBoxEntry");
+                    if (nodeToId != null && nextNodeKey != null)
+                    {
+                        var entryNodeKey = nextNodeKey();
+                        entryEl.SetAttribute(NodeKeyAttr, entryNodeKey);
+                        nodeToId[entryNodeKey] = EntryId(sapId, entry.Key);
+                    }
                     entryEl.SetAttribute("Key", Sanitize(entry.Key));
                     entryEl.SetAttribute("Value", Sanitize(entry.Value));
+                    entryEl.SetAttribute("Selected", (entry.Key == selectedKey).ToString());
                     el.AppendChild(entryEl);
                 }
             }
@@ -906,6 +942,8 @@ internal sealed class SapGuiClient : IDisposable
 
     public object? GetProperty(string elementId, string property)
     {
+        if (ResolveEntry(elementId) is var (combo, entryKey))
+            return GetEntryProperty(combo, entryKey, elementId, property);
         if (ResolveNode(elementId) is var (tree, key))
             return GetNodeProperty(tree, key, elementId, property);
         if (ResolveGridItem(elementId) is var (grid, row, column))
@@ -929,6 +967,21 @@ internal sealed class SapGuiClient : IDisposable
             "width" => comp.GetInt("Width").ToString(),
             "height" => comp.GetInt("Height").ToString(),
             _ => comp.GetString(property),
+        };
+    }
+
+    private static object? GetEntryProperty(Disp combo, string key, string elementId, string property)
+    {
+        string Value() => ComboEntries(combo).FirstOrDefault(e => e.Key == key).Value ?? "";
+        return property.ToLowerInvariant() switch
+        {
+            "id" => RawId(elementId),
+            "type" or "tagname" or "classname" or "controltype" or "localizedcontroltype" => "ComboBoxEntry",
+            "key" => key,
+            "text" or "value" => Value(),
+            "selected" or "isselected" => combo.GetString("Key") == key,
+            "changeable" or "enabled" or "isenabled" => combo.GetBool("Changeable"),
+            _ => null,
         };
     }
 
@@ -976,6 +1029,8 @@ internal sealed class SapGuiClient : IDisposable
 
     public string GetText(string elementId)
     {
+        if (ResolveEntry(elementId) is var (combo, entryKey))
+            return (string?)GetEntryProperty(combo, entryKey, elementId, "text") ?? "";
         if (ResolveNode(elementId) is var (tree, key)) return tree.GetString("GetNodeTextByKey", key);
         if (ResolveGridItem(elementId) is var (grid, row, column))
             return column == null ? GridRowText(grid, row) : grid.GetString("GetCellValue", row, column);
@@ -994,6 +1049,7 @@ internal sealed class SapGuiClient : IDisposable
 
     public string GetTagName(string elementId)
     {
+        if (TryParseEntryId(elementId, out _, out _)) return "ComboBoxEntry";
         if (ResolveNode(elementId) is not null) return "TreeNode";
         if (ResolveGridItem(elementId) is var (_, _, column)) return column == null ? "GridRow" : "GridCell";
         return Resolve(elementId).GetString("Type");
@@ -1001,6 +1057,10 @@ internal sealed class SapGuiClient : IDisposable
 
     public object GetRect(string elementId)
     {
+        if (TryParseEntryId(elementId, out _, out _))
+            throw new NotSupportedException(
+                "SAP dropdown entries have no screen geometry in the scripting API, so they cannot be clicked " +
+                "with the mouse. Use windows: select (or windows: invoke) to pick the entry.");
         if (ResolveNode(elementId) is not null)
             throw new NotSupportedException(
                 "SAP tree nodes have no screen geometry in the scripting API, so they cannot be clicked with " +
@@ -1031,6 +1091,9 @@ internal sealed class SapGuiClient : IDisposable
 
     public void SetValue(string elementId, string value)
     {
+        if (TryParseEntryId(elementId, out _, out _))
+            throw new NotSupportedException(
+                "A dropdown entry has no value to set. Use windows: select on the entry, or setValue on the dropdown.");
         if (ResolveGridItem(elementId) is var (grid, row, column))
         {
             if (column == null) throw new NotSupportedException("setValue needs a grid cell, not a row.");
@@ -1062,6 +1125,12 @@ internal sealed class SapGuiClient : IDisposable
 
     public void Invoke(string elementId)
     {
+        // Picking a dropdown entry is all there is to "activating" it.
+        if (ResolveEntry(elementId) is var (combo, entryKey))
+        {
+            combo.Set("Key", entryKey);
+            return;
+        }
         // A double-click is what "activating" a node means in SAP: it toggles a folder
         // and starts the transaction behind a leaf (e.g. SAP Easy Access).
         if (ResolveNode(elementId) is var (tree, key))
@@ -1099,14 +1168,17 @@ internal sealed class SapGuiClient : IDisposable
 
     public void SetFocus(string elementId)
     {
-        if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
+        if (ResolveEntry(elementId) is var (combo, _)) combo.Call("SetFocus");
+        else if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
         else if (ResolveGridItem(elementId) is not null) Select(elementId);
         else Resolve(elementId).Call("SetFocus");
     }
 
     public void Select(string elementId)
     {
-        if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
+        // A dropdown entry: make it the dropdown's value, like picking it from the list.
+        if (ResolveEntry(elementId) is var (combo, entryKey)) combo.Set("Key", entryKey);
+        else if (ResolveNode(elementId) is var (tree, key)) tree.Call("SelectNode", key);
         // A row: select it (like clicking its row marker); a cell: make it the current cell.
         else if (ResolveGridItem(elementId) is var (grid, row, column))
         {
