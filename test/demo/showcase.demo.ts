@@ -9,8 +9,9 @@ import { ENTER_BUTTON, SapDemo, delay, errMsg } from '../e2e/helpers/sap-demo.js
  * Showcase for a screen recording — not an e2e test. One WebDriver session drives
  * SAP GUI (through this plugin), a native window switch and a web page (over CDP):
  *
- *   1. SU3 → Defaults tab: open the Date Format dropdown with a click, pick the next
- *      entry with the keyboard, put the original back (windows: setValue).
+ *   1. SU3 → Defaults tab: open the Date Format dropdown with a click, pick the ISO
+ *      entry as an element (windows: select), put the original back
+ *      (windows: setValue by text).
  *   2. Menu bar: System → Status... (windows: invoke), show the popup, Continue.
  *   3. SE16: switch output to ALV grid ("User Parameters" popup), T000 → selection
  *      screen → Multiple Selection popup: fill its table with clients 000 and 001,
@@ -38,6 +39,8 @@ const CHROME_WINDOW = 'Google - Google Chrome'; // window title of google.com in
 // SU3
 const DEFAULTS_TAB = "//GuiTab[@Text='Defaults']";
 const DATE_FORMAT = "//GuiComboBox[@Name=//GuiLabel[@Text='Date Format']/@Name]";
+const ISO_DATE = 'YYYY-MM-DD (Gregorian Date, ISO 8601)';
+const US_DATE = 'MM/DD/YYYY (Gregorian Date)';
 
 // SE16
 const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... (F6)"
@@ -81,7 +84,7 @@ async function setUserParameters(choices: string[]): Promise<boolean> {
     }
 }
 
-/** Step 1: open the dropdown with the mouse, pick the next entry with the keyboard, restore. */
+/** Step 1: open the dropdown with the mouse, pick an entry element with windows: select, restore. */
 async function dropdown(): Promise<void> {
     const driver = demo.driver;
     await demo.pause();
@@ -92,15 +95,16 @@ async function dropdown(): Promise<void> {
     await demo.pause();
     await date.click(); // opens the list
     demo.record('Date Format: open the list', 'PASS', `selected "${original.text}"`);
+    // The entry is an element of its own (ComboBoxEntry); windows: select picks it.
+    const wanted = original.text === ISO_DATE ? US_DATE : ISO_DATE;
+    const entry = await driver.$(`${DATE_FORMAT}/ComboBoxEntry[@Value='${wanted}']`);
     await demo.pause();
-    await driver.keys(['ArrowDown']);
-    await demo.pause();
-    await driver.keys(['Enter']);
-    const picked = { key: String(await date.getAttribute('Key')), text: await date.getText() };
-    if (picked.key !== original.key) {
-        demo.record('Date Format: next entry (keyboard)', 'PASS', `"${picked.text}" (key ${picked.key})`);
+    await driver.executeScript('windows: select', [{ elementId: entry.elementId }]);
+    const picked = await date.getText();
+    if (picked === wanted && await entry.isSelected()) {
+        demo.record('Date Format: pick an entry (windows: select)', 'PASS', `"${picked}" (key ${await date.getAttribute('Key')})`);
     } else {
-        await demo.fail('Date Format: next entry (keyboard)', `still "${picked.text}"`);
+        await demo.fail('Date Format: pick an entry (windows: select)', `dropdown shows "${picked}", wanted "${wanted}"`);
     }
 
     await demo.pause();
