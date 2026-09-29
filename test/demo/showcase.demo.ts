@@ -14,8 +14,9 @@ import { ENTER_BUTTON, SapDemo, delay, errMsg } from '../e2e/helpers/sap-demo.js
  *      (windows: setValue by text).
  *   2. Menu bar: System → Status... (windows: invoke), show the popup, Continue.
  *   3. SE16: switch output to ALV grid ("User Parameters" popup), T000 → selection
- *      screen → Multiple Selection popup: fill its table with clients 000 and 001,
- *      Copy → Execute → ALV grid; read client 001.
+ *      screen → Multiple Selection for Name (SE16 leaves the client out of the
+ *      selection screen): fill its table with a few names, Copy → Execute → ALV
+ *      grid; check client 001 ("SAP SE") is in it.
  *   4. Detour to the browser: start Chrome (remote debugging on), switch to its
  *      window by title, enter its page (WEBVIEW_ context), follow the Gmail link;
  *      back to NATIVE_APP and — by title — to the SAP window.
@@ -47,12 +48,12 @@ const USER_PARAMETERS_BUTTON = '~wnd[0]/tbar[1]/btn[6]'; // "User Parameters... 
 const SETTINGS_POPUP = 'User-Specific Settings';
 const TRANSFER_BUTTON = "//GuiButton[starts-with(@Tooltip,'Transfer')]";
 const TABLE_NAME_FIELD = '~wnd[0]/usr/ctxtDATABROWSE-TABLENAME';
-const MULTIPLE_SELECTION_BUTTON = '~wnd[0]/usr/btn%_I1_%_APP_%-VALU_PUSH'; // MANDT's "Multiple selection"
+const MULTIPLE_SELECTION_BUTTON = '~wnd[0]/usr/btn%_I1_%_APP_%-VALU_PUSH'; // Name's "Multiple selection"
 const MULTIPLE_SELECTION_POPUP = 'Multiple Selection';
 const COPY_BUTTON = '~wnd[1]/tbar[0]/btn[8]'; // "Copy (F8)"
 const EXECUTE_BUTTON = '~wnd[0]/tbar[1]/btn[8]'; // "Execute (F8)"
 const GRID = "//GuiShell[@SubType='GridView']";
-const CLIENTS = ['000', '001'];
+const NAMES = ['SAP SE', 'SAP AG', 'Customizing'];
 const ALV_SETTINGS = ['ALV Grid Display', 'Field Label'];
 const ORIGINAL_SETTINGS = ['Standard SE16 list', 'Field Name'];
 
@@ -132,7 +133,7 @@ async function menu(): Promise<void> {
     await driver.switchToWindow(demo.mainWindow);
 }
 
-/** Step 3: fill the Multiple Selection table with clients, run SE16 → ALV grid. */
+/** Step 3: fill the Multiple Selection table with names, run SE16 → ALV grid. */
 async function tableToGrid(): Promise<boolean> {
     const driver = demo.driver;
     const onSelection = await demo.typeInto(TABLE_NAME_FIELD, 'Table Name', 'T000')
@@ -142,17 +143,23 @@ async function tableToGrid(): Promise<boolean> {
     const popup = await demo.openPopup(MULTIPLE_SELECTION_BUTTON, 'Multiple selection → popup', MULTIPLE_SELECTION_POPUP);
     if (!popup) {return false;}
     try {
-        for (const [i, client] of CLIENTS.entries()) {
+        for (const [i, name] of NAMES.entries()) {
             await demo.pause();
-            await (await driver.$(singleValueCell(i))).setValue(client); // typed, like a user
+            await (await driver.$(singleValueCell(i))).setValue(name); // typed, like a user
         }
-        demo.record('Fill the table', 'PASS', `clients ${CLIENTS.join(', ')}`);
-        await demo.pause();
-        await (await driver.$(COPY_BUTTON)).click();
-        await driver.waitUntil(async () => !(await driver.getWindowHandles()).includes(popup), { timeout: 10_000 });
-        await driver.switchToWindow(demo.mainWindow);
+        demo.record('Fill the table', 'PASS', NAMES.map((n) => `"${n}"`).join(', '));
     } catch (err) {
         return demo.fail('Fill the table', errMsg(err));
+    }
+    try {
+        // Copy through the bridge (Press): a mouse click on it once left the popup open.
+        await demo.pause();
+        await driver.executeScript('windows: invoke', [{ elementId: (await driver.$(COPY_BUTTON)).elementId }]);
+        await driver.waitUntil(async () => !(await driver.getWindowHandles()).includes(popup), { timeout: 10_000 });
+        await driver.switchToWindow(demo.mainWindow);
+        demo.record('Copy', 'PASS', 'popup closed');
+    } catch (err) {
+        return demo.fail('Copy', errMsg(err));
     }
 
     await demo.pause();
@@ -161,12 +168,10 @@ async function tableToGrid(): Promise<boolean> {
     if (!(await grid.waitForExist({ timeout: 15_000 }).then(() => true, () => false))) {
         return demo.fail('ALV grid', `no ${GRID} within 15s`);
     }
-    const rows: string[] = [];
-    for (const client of CLIENTS) {
-        const cell = `${GRID}//GridRow/GridCell[@Column='MTEXT' and ../GridCell[@Column='MANDT' and @Text='${client}']]`;
-        rows.push(`${client} ${await (await driver.$(cell)).getText()}`);
-    }
-    demo.record('ALV grid', 'PASS', rows.join('; '));
+    const name = await (await driver.$(`${GRID}//GridRow[GridCell[@Column='MANDT' and @Text='001']]`
+        + "/GridCell[@Column='MTEXT']")).getText();
+    if (name !== 'SAP SE') {return demo.fail('ALV grid', `client 001 reads "${name}"`);}
+    demo.record('ALV grid', 'PASS', `client 001 "${name}"`);
     return true;
 }
 
