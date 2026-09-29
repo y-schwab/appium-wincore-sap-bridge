@@ -11,7 +11,9 @@ import { SapDemo, errMsg } from './helpers/sap-demo.js';
  *   3. Back to the original entry by key (how setValue worked before).
  *   4. The same text in upper case → Key 2 again (case-insensitive match).
  *   5. A text no entry has → error, selection unchanged.
- *   6. Original entry back by key; /n back to SAP Easy Access.
+ *   6. An entry as an element: find the ISO entry (ComboBoxEntry, by its Value) and
+ *      pick it with windows: select → Key 6, and the entry reports itself selected.
+ *   7. Original entry back by key; /n back to SAP Easy Access.
  *
  * windows: setValue, not element.setValue: the latter clears the dropdown first
  * (setValue "") and then types keystrokes; Date Format has no blank entry to clear to.
@@ -30,6 +32,8 @@ const DATE_FORMAT = "//GuiComboBox[@Name=//GuiLabel[@Text='Date Format']/@Name]"
 // Two Date Format entries; switch to whichever isn't selected.
 const MDY = { key: '2', text: 'MM/DD/YYYY (Gregorian Date)' };
 const MDY_DASH = { key: '3', text: 'MM-DD-YYYY (Gregorian Date)' };
+const ISO = { key: '6', text: 'YYYY-MM-DD (Gregorian Date, ISO 8601)' };
+const ISO_ENTRY = `${DATE_FORMAT}/ComboBoxEntry[@Value='${ISO.text}']`;
 
 interface Entry { key: string; text: string }
 
@@ -107,7 +111,24 @@ describe('GuiComboBox: SU3 Date Format', () => {
                     }
                 }
 
-                // 6. Leave it as it was.
+                // 6. An entry as an element: windows: select picks it.
+                try {
+                    await demo.pause();
+                    const entry = await driver.$(ISO_ENTRY);
+                    await driver.executeScript('windows: select', [{ elementId: entry.elementId }]);
+                    const now = { key: await key(), text: await dropdown.getText() };
+                    const entrySelected = await entry.isSelected();
+                    const detail = `Key '${now.key}', "${now.text}", entry isSelected ${entrySelected}`;
+                    if (now.key === ISO.key && now.text === ISO.text && entrySelected) {
+                        demo.record('windows: select on an entry', 'PASS', detail);
+                    } else {
+                        await demo.fail('windows: select on an entry', `${detail}; expected Key '${ISO.key}'`);
+                    }
+                } catch (err) {
+                    await demo.fail('windows: select on an entry', errMsg(err));
+                }
+
+                // 7. Leave it as it was.
                 await setAndCheck('Restore by key', original.key, original);
             }
         } catch (err) {

@@ -193,6 +193,17 @@ A key wins over another entry's text; then the text matches exactly, then
 ignoring case, then the key ignoring case. Blanks around either are ignored.
 A value that matches no entry, or several, is an error.
 
+Entries are elements too (`sap:<dropdown id>#entry:<key>`): pick one with
+`windows: select` (or `windows: invoke`); `getText` is its text, `isSelected`
+whether it is the current one. They have no screen position, so `click()` is
+refused.
+
+```ts
+const iso = await driver.$("//GuiComboBox[@Name='SUID_ST_NODE_DEFAULTS-DATFM']"
+    + "/ComboBoxEntry[@Value='YYYY-MM-DD (Gregorian Date, ISO 8601)']");
+await driver.executeScript('windows: select', [{ elementId: iso.elementId }]);
+```
+
 ### Other controls
 
 Text fields, labels, buttons, checkboxes, radio buttons, tabs, the command
@@ -211,7 +222,8 @@ through standard WebDriver. `windows: select` ticks a checkbox.
       [{ elementId: table.elementId, deltaY: 120 }]);  // one notch down
   ```
 
-- Tree nodes, grid rows and cells, and menu items have no screen position:
+- Tree nodes, grid rows and cells, dropdown entries and menu items have no
+  screen position:
   `click()` is refused. Use `windows: select` / `windows: invoke`.
 - Plain `element.setValue()` clears the field and types keystrokes; for
   dropdowns, use `windows: setValue`.
