@@ -27,7 +27,9 @@ import { ENTER_BUTTON, SapDemo, delay, errMsg } from '../e2e/helpers/sap-demo.js
  * parameters are set back.
  *
  * Run: npm run demo. Record: SAP_DEMO_RECORD=1 SAP_DEMO_PACE_MS=1500 npm run demo
- * → test-output/showcase/recording.mp4. Chrome at CHROME_PATH (default: the standard
+ * → test-output/showcase/recording.mp4. While recording it also holds on key moments
+ * (open dropdown, new value, status popup, filled table, grid, browser, Gmail, SAP
+ * again, selected row) for SAP_DEMO_HOLD_MS each (default 2000). Chrome at CHROME_PATH (default: the standard
  * install path); DevTools port CHROME_DEBUG_PORT (default 9222).
  *
  * Precondition: a SAP connection is open and logged in, on SAP Easy Access; nothing
@@ -61,6 +63,11 @@ const ORIGINAL_SETTINGS = ['Standard SE16 list', 'Field Name'];
 const singleValueCell = (i: number) => `//GuiTableControl/TableRow[@Index='${i}']/*[contains(@Name,'SLOW_I')]`;
 
 const demo = new SapDemo('showcase', 'Showcase: SAP GUI, a browser and back');
+
+// Holds on key moments, so a recording shows what just happened. Only while recording
+// (SAP_DEMO_RECORD=1): SAP_DEMO_HOLD_MS each (default 2000). Plain runs don't wait.
+const HOLD_MS = process.env.SAP_DEMO_RECORD === '1' ? Number(process.env.SAP_DEMO_HOLD_MS ?? 2000) : 0;
+const hold = () => delay(HOLD_MS);
 let chrome: ChildProcess | undefined;
 
 /** SE16 → User Parameters popup → pick radio buttons by text → Transfer. */
@@ -96,6 +103,7 @@ async function dropdown(): Promise<void> {
     await demo.pause();
     await date.click(); // opens the list
     demo.record('Date Format: open the list', 'PASS', `selected "${original.text}"`);
+    await hold(); // the open list
     // The entry is an element of its own (ComboBoxEntry); windows: select picks it.
     const wanted = original.text === ISO_DATE ? US_DATE : ISO_DATE;
     const entry = await driver.$(`${DATE_FORMAT}/ComboBoxEntry[@Value='${wanted}']`);
@@ -104,6 +112,7 @@ async function dropdown(): Promise<void> {
     const picked = await date.getText();
     if (picked === wanted && await entry.isSelected()) {
         demo.record('Date Format: pick an entry (windows: select)', 'PASS', `"${picked}" (key ${await date.getAttribute('Key')})`);
+        await hold(); // the new value
     } else {
         await demo.fail('Date Format: pick an entry (windows: select)', `dropdown shows "${picked}", wanted "${wanted}"`);
     }
@@ -126,8 +135,8 @@ async function menu(): Promise<void> {
     if (!popup) {return;}
     const user = await (await driver.$("//GuiTextField[@Name='SYST-UNAME']")).getText();
     demo.record('Status popup', 'PASS', `user "${user}"`);
+    await hold(); // the status popup
     await demo.pause();
-    await demo.pause(); // let the popup show in a recording
     await (await driver.$('~wnd[1]/tbar[0]/btn[0]')).click(); // Continue
     await driver.waitUntil(async () => !(await driver.getWindowHandles()).includes(popup), { timeout: 10_000 });
     await driver.switchToWindow(demo.mainWindow);
@@ -148,6 +157,7 @@ async function tableToGrid(): Promise<boolean> {
             await (await driver.$(singleValueCell(i))).setValue(name); // typed, like a user
         }
         demo.record('Fill the table', 'PASS', NAMES.map((n) => `"${n}"`).join(', '));
+        await hold(); // the filled table
     } catch (err) {
         return demo.fail('Fill the table', errMsg(err));
     }
@@ -172,6 +182,7 @@ async function tableToGrid(): Promise<boolean> {
         + "/GridCell[@Column='MTEXT']")).getText();
     if (name !== 'SAP SE') {return demo.fail('ALV grid', `client 001 reads "${name}"`);}
     demo.record('ALV grid', 'PASS', `client 001 "${name}"`);
+    await hold(); // the grid
     return true;
 }
 
@@ -194,6 +205,7 @@ async function browserDetour(sapTitle: string): Promise<boolean> {
             } catch { return false; }
         }, { timeout: 20_000, interval: 1000 });
         demo.record('Switch to Chrome (by title)', 'PASS', `"${await driver.getTitle()}"`);
+        await hold(); // the browser, in front of SAP
 
         // Web: the page, as a WEBVIEW_ context.
         let contexts: { id: string; url?: string }[] = [];
@@ -219,6 +231,7 @@ async function browserDetour(sapTitle: string): Promise<boolean> {
         await driver.waitUntil(async () => /gmail|mail\.google/.test(await driver.getUrl()), { timeout: 15_000 });
         await demo.pause();
         demo.record('Gmail link', 'PASS', `"${await driver.getTitle()}" ${await driver.getUrl()}`);
+        await hold(); // the Gmail page
     } catch (err) {
         await demo.fail('Browser detour', errMsg(err));
     }
@@ -231,6 +244,7 @@ async function browserDetour(sapTitle: string): Promise<boolean> {
         const back = await driver.getWindowHandle();
         if (back === demo.mainWindow) {
             demo.record('Back to SAP (by title)', 'PASS', `"${await driver.getTitle()}"`);
+            await hold(); // SAP in front again
             return true;
         }
         return demo.fail('Back to SAP (by title)', `window ${back}, SAP is ${demo.mainWindow}`);
@@ -248,6 +262,7 @@ async function selectClient(): Promise<void> {
     const selected = String(await row.getAttribute('IsSelected')).toLowerCase() === 'true';
     await demo.pause();
     if (selected) {demo.record('Select client 001 in the grid', 'PASS', 'IsSelected=true');} else {await demo.fail('Select client 001 in the grid', 'not selected');}
+    await hold(); // the selected row
 }
 
 function closeChrome(): void {
