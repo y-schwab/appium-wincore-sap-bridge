@@ -29,7 +29,8 @@
     "test:e2e": "npx vitest run --config vitest.e2e.config.ts",
     "inspect": "node scripts/sap-inspect.mjs",
     "test:unit": "dotnet test csharp/WincoreSapBridge.Tests",
-    "prepublishOnly": "npm run build:all"
+    "prepublishOnly": "npm run build:all",
+    "demo": "npx vitest run --config vitest.demo.config.ts"
   },
   "author": "Automate The Planet",
   "license": "Apache-2.0",
